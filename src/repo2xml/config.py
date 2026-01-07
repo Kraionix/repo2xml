@@ -49,16 +49,19 @@ class Repo2XMLConfig:
     formatting: Formatting = Formatting.compact
     binary: BinaryMode = BinaryMode.skip
     newline: NewlineMode = NewlineMode.preserve
-    
+
+    # Meta output
+    include_timestamp: bool = True
+
     # Filtering
     use_gitignore: bool = True
     ignore_patterns: List[str] = field(default_factory=list)
     include_patterns: List[str] = field(default_factory=list)
     hard_exclude_dirs: List[str] = field(default_factory=lambda: [".git"])
-    
+
     # Symlinks / Traversal
     follow_symlinks_dirs: bool = False
     symlinks_files: SymlinkFilesMode = SymlinkFilesMode.follow
-    
+
     # Ingestion limits
     max_file_size: int = 100_000

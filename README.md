@@ -24,6 +24,7 @@ Convert a source code repository into a single, structured XML context for LLM i
 - **Binary handling**: skip, embed as base64, or store SHA-256 hash.
 - **Formatting modes**: `compact` (default), `pretty` (indented), or `minify`.
 - **Output**: File or stdout; optional gzip/zstd compression.
+- **Deterministic output option**: `--no-timestamp` omits `generated_at_utc` for stable diffs.
 
 ## Installation
 
@@ -55,6 +56,12 @@ Generate full XML with explicit path and settings:
 
 ```bash
 repo2xml --mode full --formatting compact --newline lf -o context.xml ./my-project
+```
+
+Deterministic output (omit timestamp):
+
+```bash
+repo2xml --no-timestamp -o context.xml .
 ```
 
 Structure only (fast, no file reads, useful for initial LLM prompts):
@@ -105,6 +112,9 @@ repo2xml --help
 - `--newline [preserve|lf]`
   Normalize line endings. `lf` is **highly recommended** for LLM ingestion to save tokens and improve diff stability. **Default:** `preserve`.
 
+- `--no-timestamp`
+  Omit `<generated_at_utc>` from the XML meta block, for deterministic output.
+
 ### Filtering
 
 - `--gitignore / --no-gitignore`
@@ -145,7 +155,7 @@ The output is a single XML document.
     <root_path>...</root_path>
     <generated_at_utc>...</generated_at_utc>
   </meta>
-  
+
   <!-- Complete Directory Tree -->
   <project_structure>
     <dir name="src" path="src">
@@ -156,16 +166,18 @@ The output is a single XML document.
   <!-- File Contents -->
   <files mode="full">
     <file path="src/main.py" size="1024" ext=".py" mtime_utc="...">
-      <content><![CDATA[ ... file content ... ]]></content>
+      <content><![CDATA[ ... file content ... ]]]]><![CDATA[></content>
     </file>
-    
+
     <!-- Example of skipped/error file -->
-    <file path="bin/image.png" skipped="true">
+    <file path="bin/image.png" size="..." ext=".png" mtime_utc="..." skipped="true">
        <error>Skipped: Binary file detected</error>
     </file>
   </files>
 </repository_context>
 ```
+
+If `--no-timestamp` is used, `<generated_at_utc>` is omitted.
 
 Paths in XML are always repository-relative and use POSIX separators (`/`), even on Windows.
 
@@ -173,8 +185,9 @@ Paths in XML are always repository-relative and use POSIX separators (`/`), even
 
 `repo2xml` employs a "fail-soft" strategy:
 1.  **Access Errors:** If a file cannot be read (permissions, locks), it is reported as an `<error>` in the XML, but processing continues.
-2.  **Encoding:** It attempts to detect encodings (BOM) and falls back to UTF-8 with replacement characters. It does not crash on binary garbage in text files.
-3.  **XML Safety:** Content is wrapped in CDATA.
+2.  **Directory Access Errors:** If a directory cannot be listed (permissions, transient errors), it is skipped and a warning is logged.
+3.  **Encoding:** It attempts to detect encodings (BOM) and falls back to UTF-8 with replacement characters. It does not crash on binary garbage in text files.
+4.  **XML Safety:** Content is wrapped in CDATA.
 
 ## Performance Notes
 

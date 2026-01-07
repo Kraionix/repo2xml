@@ -41,7 +41,7 @@ def _open_output_stream(
     """
     Open an output stream for the XML bytes.
     Handles File vs Stdout and Compression transparently.
-    
+
     Returns: (binary_stream, closer_callback)
     """
     if use_stdout:
@@ -129,6 +129,11 @@ def main(
         "--mode",
         help="Output mode.",
     ),
+    no_timestamp: bool = typer.Option(
+        False,
+        "--no-timestamp",
+        help="Do not emit generated_at_utc (for deterministic output).",
+    ),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
@@ -206,14 +211,14 @@ def main(
 
     # Prepare configuration
     user_ignore = list(ignore) if ignore else []
-    
-    # Auto-exclude output file to prevent self-inclusion loop
-    # Only relevant if we are writing to a file, but we add it just in case
-    # to maintain consistency across modes.
+
+    # Auto-exclude output file to prevent self-inclusion loop.
+    # If the output is inside the scanned root, anchor it to repo root ("/...") so we do not
+    # accidentally ignore other same-named files elsewhere in the tree.
     if not stdout and not clipboard:
         rel_out = _try_relpath(out_abs, root)
         if rel_out:
-            user_ignore.append(rel_out)
+            user_ignore.append("/" + rel_out)
         else:
             user_ignore.append(out_abs.name)
 
@@ -222,6 +227,7 @@ def main(
         formatting=formatting,
         binary=binary,
         newline=newline,
+        include_timestamp=not no_timestamp,
         use_gitignore=gitignore,
         ignore_patterns=user_ignore,
         include_patterns=list(include) if include else [],
@@ -248,19 +254,19 @@ def main(
     if clipboard:
         logger.info("Mode: Clipboard. Buffering output...")
         mem_buffer = io.BytesIO()
-        
+
         try:
             if progress:
                 with tqdm(desc="Processing", unit="file") as pbar:
                     engine.export(mem_buffer, progress_callback=lambda n: pbar.update(n))
             else:
                 engine.export(mem_buffer)
-            
+
             # Decode (XML is text) and copy
             xml_content = mem_buffer.getvalue().decode("utf-8")
             pyperclip.copy(xml_content)
             logger.info("Success! XML context copied to clipboard (%d chars).", len(xml_content))
-            
+
         except pyperclip.PyperclipException as e:
             logger.error("Clipboard error: %s", e)
             logger.error("On Linux, ensure xclip or xsel is installed.")

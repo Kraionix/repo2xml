@@ -18,7 +18,7 @@ logger = logging.getLogger("repo2xml.api")
 class Repo2XML:
     """
     Main API Facade for repo2xml.
-    
+
     This class orchestrates the scanning, filtering, reading, and serializing
     process. It is designed to be IO-agnostic regarding the output stream.
     """
@@ -26,7 +26,7 @@ class Repo2XML:
     def __init__(self, root_path: Path, config: Repo2XMLConfig):
         self.root_path = root_path.resolve()
         self.config = config
-        
+
         # Initialize core components
         self.filter_engine = FilterEngine(
             self.root_path,
@@ -50,13 +50,13 @@ class Repo2XML:
         yield from self.scanner.scan()
 
     def export(
-        self, 
-        output_stream: BinaryIO, 
+        self,
+        output_stream: BinaryIO,
         progress_callback: Optional[Callable[[int], None]] = None
     ) -> None:
         """
         Execute the full pipeline and write XML bytes to the output_stream.
-        
+
         Args:
             output_stream: A writable binary stream (file, stdout, BytesIO).
             progress_callback: Optional function called with incremented count (processed files).
@@ -66,11 +66,19 @@ class Repo2XML:
         # at the top of the XML file.
         logger.info("Scanning repository: %s", self.root_path)
         all_nodes: List[FileNode] = list(self.scan())
+
+        # Keep ordering consistent across <project_structure> and <files>.
+        # This also improves diff stability for LLM prompts.
+        all_nodes.sort(key=lambda n: n.rel_path)
+
         total_files = len(all_nodes)
         logger.info("Found %d files.", total_files)
 
         # Initialize Serializer
-        generated_at = datetime.now(timezone.utc).isoformat()
+        generated_at = None
+        if self.config.include_timestamp:
+            generated_at = datetime.now(timezone.utc).isoformat()
+
         serializer = XMLSerializer(
             root_path_str=str(self.root_path),
             generated_at_utc=generated_at,
@@ -102,7 +110,7 @@ class Repo2XML:
 
     def _process_node(self, node: FileNode, serializer: XMLSerializer, write_fn: Callable[[str], None]) -> None:
         """Handle individual file serialization logic based on configuration."""
-        
+
         # Link-only mode for symlinks overrides content reading
         if node.is_symlink and self.config.symlinks_files == SymlinkFilesMode.as_link:
             write_fn(serializer.serialize_link(node))

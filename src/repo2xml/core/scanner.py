@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Generator, Optional, Set
 
 from .domain import FileNode
 from .filters import FilterEngine
+
+logger = logging.getLogger("repo2xml.scanner")
 
 
 class RepositoryScanner:
@@ -91,8 +94,10 @@ class RepositoryScanner:
 
         try:
             entries = list(os.scandir(dir_abs))
-        except OSError:
+        except OSError as e:
             # Permissions / transient filesystem errors: skip this directory.
+            # Keep scanning other directories (fail-soft), but make it visible to users.
+            logger.warning("Cannot read directory: %s (%s)", dir_abs, e)
             if pushed:
                 del patterns[-pushed:]
             return
@@ -140,18 +145,21 @@ class RepositoryScanner:
                 yield from self._scan_dir(child_dir, rel, patterns, spec)
                 continue
 
-            # File handling: optionally treat symlink files as link-only.
-            follow_file = not (is_symlink and self.symlinks_files == "as-link")
+            # Symlink file handling.
+            # Important note:
+            # - For "as-link" mode we still need to *discover* symlinked files.
+            #   Using is_file(follow_symlinks=False) often returns False for symlink entries,
+            #   so we always classify files with follow_symlinks=True and control "content reads"
+            #   later in the API layer.
+            if is_symlink and self.symlinks_files == "skip":
+                continue
 
             try:
-                is_file = entry.is_file(follow_symlinks=follow_file)
+                is_file = entry.is_file(follow_symlinks=True)
             except OSError:
                 continue
 
             if not is_file:
-                continue
-
-            if is_symlink and self.symlinks_files == "skip":
                 continue
 
             if spec.match_file(rel):
@@ -164,9 +172,10 @@ class RepositoryScanner:
                 except OSError:
                     symlink_target = None
 
-            # File stat: follow or not follow based on symlink file mode.
+            # File stat: we follow symlinks here to get stable metadata about the target file.
+            # The actual content read is controlled later (Repo2XML._process_node).
             try:
-                st = entry.stat(follow_symlinks=follow_file)
+                st = entry.stat(follow_symlinks=True)
             except OSError:
                 continue
 

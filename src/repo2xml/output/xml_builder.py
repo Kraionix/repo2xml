@@ -4,7 +4,7 @@ import base64
 import html
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from ..core.domain import FileNode
 
@@ -56,7 +56,7 @@ class XMLSerializer:
     def __init__(
         self,
         root_path_str: str,
-        generated_at_utc: str,
+        generated_at_utc: Optional[str],
         tool_version: str = "0.1.0",
         formatting: str = "compact",
     ):
@@ -85,14 +85,18 @@ class XMLSerializer:
         i1 = self._indent(1)
         i2 = self._indent(2)
 
-        return (
-            f'{i0}<?xml version="1.0" encoding="utf-8"?>{nl}'
-            f'{i0}<repository_context version="1.0" tool_version="{_esc_attr(self.tool_version)}">{nl}'
-            f"{i1}<meta>{nl}"
-            f"{i2}<root_path>{html.escape(self.root_path)}</root_path>{nl}"
-            f"{i2}<generated_at_utc>{html.escape(self.generated_at_utc)}</generated_at_utc>{nl}"
-            f"{i1}</meta>{nl}"
-        )
+        out = [
+            f'{i0}<?xml version="1.0" encoding="utf-8"?>{nl}',
+            f'{i0}<repository_context version="1.0" tool_version="{_esc_attr(self.tool_version)}">{nl}',
+            f"{i1}<meta>{nl}",
+            f"{i2}<root_path>{html.escape(self.root_path)}</root_path>{nl}",
+        ]
+
+        if self.generated_at_utc is not None:
+            out.append(f"{i2}<generated_at_utc>{html.escape(self.generated_at_utc)}</generated_at_utc>{nl}")
+
+        out.append(f"{i1}</meta>{nl}")
+        return "".join(out)
 
     def stream_footer(self) -> str:
         return f"{self._indent(0)}</repository_context>{self.nl}"
@@ -213,7 +217,7 @@ class XMLSerializer:
         """Emit a skipped/error entry with a human-readable reason."""
         nl = self.nl
         return (
-            f'{self._indent(2)}<file path="{_esc_attr(node.rel_path)}" skipped="true">{nl}'
+            f'{self._indent(2)}<file {self._file_attr_str(node)} skipped="true">{nl}'
             f"{self._indent(3)}<error>{html.escape(error)}</error>{nl}"
             f"{self._indent(2)}</file>{nl}"
         )
