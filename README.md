@@ -1,4 +1,3 @@
-```markdown
 # repo2xml
 
 Convert a source code repository into a single, structured XML context for LLM ingestion.
