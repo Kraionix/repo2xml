@@ -140,6 +140,21 @@ def main(
         "--root-path-mode",
         help="How to represent <root_path>: absolute|relative|redact.",
     ),
+    ext_binary_detect: bool = typer.Option(
+        True,
+        "--ext-binary-detect/--no-ext-binary-detect",
+        help="Fast-path binary detection by file extension (default: enabled).",
+    ),
+    binary_ext_add: Optional[List[str]] = typer.Option(
+        None,
+        "--binary-ext-add",
+        help="Extra binary extensions for fast-path detection (repeatable). Example: .psd",
+    ),
+    binary_ext_remove: Optional[List[str]] = typer.Option(
+        None,
+        "--binary-ext-remove",
+        help="Remove extensions from the default binary fast-path set (repeatable). Example: .pdf",
+    ),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
@@ -235,6 +250,9 @@ def main(
         newline=newline,
         include_timestamp=not no_timestamp,
         root_path_mode=root_path_mode,
+        binary_ext_fastpath=ext_binary_detect,
+        binary_ext_add=list(binary_ext_add) if binary_ext_add else [],
+        binary_ext_remove=list(binary_ext_remove) if binary_ext_remove else [],
         use_gitignore=gitignore,
         ignore_patterns=user_ignore,
         include_patterns=list(include) if include else [],

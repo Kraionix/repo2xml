@@ -4,7 +4,7 @@ import base64
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Literal, Optional
+from typing import Iterable, Literal, Optional, Sequence
 
 # Number of bytes used for binary/encoding heuristics.
 SNIFF_BYTES = 4096
@@ -22,7 +22,7 @@ _BOMS: list[tuple[bytes, str]] = [
 # This is intentionally conservative: avoid ambiguous formats that can be plain text.
 _BINARY_EXTS: set[str] = {
     # Images
-    ".png", ".jpg", "jxl", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".tiff", ".tif",
+    ".png", ".jpg", ".jxl", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".tiff", ".tif",
     # Audio/Video
     ".mp3", ".wav", ".flac", ".ogg", ".m4a",
     ".mp4", ".mkv", ".avi", ".mov", ".webm",
@@ -85,24 +85,88 @@ def _looks_binary(sample: bytes, bom_encoding: Optional[str]) -> bool:
     return (nontext / len(sample)) > 0.30
 
 
-def _is_likely_binary_by_extension(path: Path) -> bool:
+def _norm_ext(s: str) -> str:
+    """
+    Normalize an extension string for matching.
+
+    - Case-insensitive: always lowercased.
+    - Adds a leading dot if missing ("PNG" -> ".png").
+    """
+    t = s.strip().lower()
+    if not t:
+        return ""
+    if not t.startswith("."):
+        t = "." + t
+    return t
+
+
+def _build_binary_ext_sets(
+    *,
+    add: Optional[Sequence[str]],
+    remove: Optional[Sequence[str]],
+) -> tuple[set[str], set[str]]:
+    """
+    Build binary extension sets with optional user overrides.
+
+    - add/remove entries are normalized and treated case-insensitively.
+    - If an entry looks like a compound suffix (".tar.gz"), it is applied to the compound set.
+    """
+    exts = set(_BINARY_EXTS)
+    comps = set(_BINARY_COMPOUND_SUFFIXES)
+
+    def apply_remove(v: str) -> None:
+        if v.count(".") >= 2:
+            comps.discard(v)
+        exts.discard(v)
+
+    def apply_add(v: str) -> None:
+        if v.count(".") >= 2:
+            comps.add(v)
+        else:
+            exts.add(v)
+
+    if remove:
+        for raw in remove:
+            v = _norm_ext(raw)
+            if v:
+                apply_remove(v)
+
+    if add:
+        for raw in add:
+            v = _norm_ext(raw)
+            if v:
+                apply_add(v)
+
+    return exts, comps
+
+
+def _is_likely_binary_by_extension(
+    path: Path,
+    *,
+    add: Optional[Sequence[str]] = None,
+    remove: Optional[Sequence[str]] = None,
+) -> bool:
     """
     Fast-path: classify obvious binary formats by filename extension.
 
     This helps avoid unnecessary IO and decoding attempts for files that are
     almost certainly binary.
+
+    Matching is case-insensitive.
     """
     suffixes = [s.lower() for s in path.suffixes]
     if not suffixes:
         return False
 
+    exts, comps = _build_binary_ext_sets(add=add, remove=remove)
+
     # Compound suffix match (".tar.gz" etc).
     if len(suffixes) >= 2:
         comp = "".join(suffixes[-2:])
-        if comp in _BINARY_COMPOUND_SUFFIXES:
+        if comp in comps:
             return True
 
-    return suffixes[-1] in _BINARY_EXTS
+    return suffixes[-1] in exts
 
 
 @dataclass(slots=True)
@@ -128,7 +192,7 @@ class FileIngestor:
 
     Design notes:
     - Uses size limit to avoid large reads.
-    - Uses extension-based binary fast path (high confidence).
+    - Uses extension-based binary fast path (high confidence, configurable).
     - Uses BOM detection to decode UTF-16/32 correctly.
     - Supports newline normalization to reduce prompt noise.
     """
@@ -139,6 +203,9 @@ class FileIngestor:
         *,
         max_size: int,
         newline_mode: str,  # "preserve" | "lf"
+        use_ext_fastpath: bool = True,
+        binary_ext_add: Optional[Sequence[str]] = None,
+        binary_ext_remove: Optional[Sequence[str]] = None,
     ) -> IngestResult:
         # Stat first to enforce a hard size limit cheaply.
         try:
@@ -150,7 +217,9 @@ class FileIngestor:
             return IngestResult(kind="skip", error=f"Skipped: File size {st.st_size} exceeds limit {max_size}")
 
         # Fast-path binary classification by extension (no reads).
-        if _is_likely_binary_by_extension(path):
+        if use_ext_fastpath and _is_likely_binary_by_extension(
+            path, add=binary_ext_add, remove=binary_ext_remove
+        ):
             return IngestResult(kind="binary")
 
         # Read a small sample for heuristics and BOM detection.
@@ -167,10 +236,13 @@ class FileIngestor:
         except OSError as e:
             return IngestResult(kind="error", error=f"Error reading file: {e}")
 
-        raw = sample + rest
+        # Avoid `sample + rest` (extra large allocation/copy). Use a single growable buffer.
+        buf = bytearray(sample)
+        buf.extend(rest)
+
         enc = bom_enc or "utf-8"
         try:
-            text = raw.decode(enc, errors="replace")
+            text = buf.decode(enc, errors="replace")
         except Exception as e:
             return IngestResult(kind="error", error=f"Error decoding with {enc}: {e}")
 

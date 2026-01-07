@@ -67,6 +67,11 @@ class Repo2XMLConfig:
     include_timestamp: bool = True
     root_path_mode: RootPathMode = RootPathMode.absolute
 
+    # Binary detection
+    binary_ext_fastpath: bool = True
+    binary_ext_add: List[str] = field(default_factory=list)
+    binary_ext_remove: List[str] = field(default_factory=list)
+
     # Filtering
     use_gitignore: bool = True
     ignore_patterns: List[str] = field(default_factory=list)

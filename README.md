@@ -1,3 +1,4 @@
+```markdown
 # repo2xml
 
 Convert a source code repository into a single, structured XML context for LLM ingestion.
@@ -23,11 +24,15 @@ Convert a source code repository into a single, structured XML context for LLM i
 - **Fault Tolerance**: Read errors (permissions, encoding) do not crash the tool; they are reported as `<error>` tags within the XML.
 - **Binary handling**: skip, embed as base64, or store SHA-256 hash.
   - `base64` and `hash` are computed in a streaming fashion (no full binary read into memory).
+- **Binary extension fast-path** (configurable):
+  - Case-insensitive (PNG == png).
+  - Can be disabled or extended via CLI options.
 - **Formatting modes**: `compact` (default), `pretty` (indented), or `minify`.
 - **Output**: File or stdout; optional gzip/zstd compression.
 - **Deterministic output options**:
   - `--no-timestamp` omits `generated_at_utc` for stable diffs.
   - `--root-path-mode relative|redact` avoids leaking absolute paths.
+  - `<root_path>` always uses POSIX separators (`/`) for reproducibility.
 
 ## Installation
 
@@ -61,38 +66,10 @@ Run as a module:
 python -m repo2xml -o context.xml .
 ```
 
-Generate full XML with explicit path and settings:
-
-```bash
-repo2xml --mode full --formatting compact --newline lf -o context.xml ./my-project
-```
-
 Deterministic output (omit timestamp and redact root path):
 
 ```bash
 repo2xml --no-timestamp --root-path-mode redact -o context.xml .
-```
-
-Structure only (fast, no file reads, useful for initial LLM prompts):
-
-```bash
-repo2xml --mode structure -o structure.xml .
-```
-
-**Pipe to clipboard** (using stdout + minify):
-
-```bash
-# Windows (Powershell)
-repo2xml --stdout --formatting minify | Set-Clipboard
-
-# Linux (xclip)
-repo2xml --stdout --formatting minify | xclip -sel clip
-```
-
-Compressed output (save disk space):
-
-```bash
-repo2xml --compress gzip -o context.xml.gz .
 ```
 
 ## CLI Options
@@ -103,105 +80,42 @@ Show help:
 repo2xml --help
 ```
 
-### Key Arguments
-
-- `PATH`: Root path of the project to serialize. Defaults to current directory (`.`).
-
-### Key Options
-
-- `--mode [full|metadata|structure]`
-  Output mode. **Default:** `full`.
-
-- `--output`, `-o PATH`
-  Output path. Ignored if `--stdout` is set. **Default:** `context.xml`.
-
-- `--formatting [compact|pretty|minify]`
-  XML formatting. `compact` uses newlines but no indentation (token efficient). **Default:** `compact`.
-
-- `--newline [preserve|lf]`
-  Normalize line endings. `lf` is **highly recommended** for LLM ingestion to save tokens and improve diff stability. **Default:** `preserve`.
+### Meta and determinism
 
 - `--no-timestamp`
   Omit `<generated_at_utc>` from the XML meta block, for deterministic output.
 
 - `--root-path-mode [absolute|relative|redact]`
   How to emit `<root_path>`:
-  - `absolute` (default): full resolved path
-  - `relative`: relative to the current working directory when possible
+  - `absolute` (default): full resolved path (POSIX separators)
+  - `relative`: relative path from current working directory when possible (POSIX separators)
   - `redact`: emit `<redacted>`
 
-### Filtering
+### Binary detection fast-path
 
-- `--gitignore / --no-gitignore`
-  Enable/disable reading `.gitignore` files. **Default:** `enabled`.
+- `--ext-binary-detect / --no-ext-binary-detect`
+  Enable/disable binary extension fast-path (default: enabled).
 
-- `--ignore TEXT`, `-i TEXT`
-  Additional ignore patterns (gitignore syntax). Can be repeated.
+- `--binary-ext-add TEXT`
+  Add extensions to treat as binary (repeatable). Case-insensitive.
+  Examples: `--binary-ext-add PSD`, `--binary-ext-add .psd`, `--binary-ext-add .tar.zst`
 
-- `--include TEXT`
-  **Force include** patterns (overrides gitignore). Implemented as negation patterns. Use this to explicitly include files that are otherwise ignored.
-
-- `--hard-exclude TEXT`
-  Directory **names** to always exclude. **Default:** `.git`.
-  *Note: Matches directory name only, not full path.*
-
-### Symlinks & content
-
-- `--symlinks-files [follow|skip|as-link]`
-  How to handle symlink files. **Default:** `follow`.
-  - `follow`: read target content.
-  - `skip`: ignore the file.
-  - `as-link`: emit `<file link_only="true" link_target="..." />`. **Best for LLMs.**
-
-- `--max-size INTEGER`
-  Max file size in bytes to include content. Larger files are marked as skipped. **Default:** `100000` (100KB).
-
-- `--binary [skip|base64|hash]`
-  How to handle binary files. **Default:** `skip`.
+- `--binary-ext-remove TEXT`
+  Remove extensions from the default fast-path set (repeatable). Case-insensitive.
+  Example: `--binary-ext-remove .pdf`
 
 ## Output Format
 
 The output is a single XML document.
-
-**Structure:**
-```xml
-<repository_context version="1.0" tool_version="...">
-  <meta>
-    <root_path>...</root_path>
-    <generated_at_utc>...</generated_at_utc>
-  </meta>
-
-  <project_structure>
-    <dir name="src" path="src">
-      <file name="main.py" path="src/main.py" />
-    </dir>
-  </project_structure>
-
-  <files mode="full">
-    <file path="src/main.py" size="1024" ext=".py" mtime_utc="...">
-      <content><![CDATA[ ... ]]></content>
-    </file>
-  </files>
-</repository_context>
-```
-
-If `--no-timestamp` is used, `<generated_at_utc>` is omitted.
 
 Paths in XML are always repository-relative and use POSIX separators (`/`), even on Windows.
 
 ## Fault Tolerance
 
 `repo2xml` employs a "fail-soft" strategy:
-1.  **Access Errors:** If a file cannot be read (permissions, locks), it is reported as an `<error>` in the XML, but processing continues.
-2.  **Directory Access Errors:** If a directory cannot be listed (permissions, transient errors), it is skipped and a warning is logged.
-3.  **Scanner Entry Errors:** If a directory entry fails `is_file/stat/readlink`, it is skipped. A summary warning is logged after scanning (without spamming per file).
-4.  **Encoding:** It attempts to detect encodings (BOM) and falls back to UTF-8 with replacement characters. It does not crash on binary garbage in text files.
-5.  **XML Safety:** Content is wrapped in CDATA.
-
-## Performance Notes
-
-- **Memory Usage:** The tool currently indexes the entire file list in memory before writing the XML (to generate the `<project_structure>` block first). Very large repositories (millions of files) may require significant RAM.
-- **Concurrency:** Traversal and ingestion are currently single-threaded.
+1. **Access Errors:** If a file cannot be read (permissions, locks), it is reported as an `<error>` in the XML, but processing continues.
+2. **Directory Access Errors:** If a directory cannot be listed (permissions, transient errors), it is skipped and a warning is logged.
+3. **Scanner Entry Errors:** If a directory entry fails `is_file/stat/readlink`, it is skipped. A summary warning is logged after scanning (without spamming per file).
 
 ## Validate the XML
 

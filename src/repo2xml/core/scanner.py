@@ -123,7 +123,14 @@ class RepositoryScanner:
         Implementation detail:
         We keep a single mutable list of patterns (stack-like) and extend/delete
         as we traverse directories. This avoids repeated list allocations.
+
+        Important:
+        A single RepositoryScanner instance may be reused (library usage), so we must
+        reset per-run state (visited set and stats) at the start of each scan.
         """
+        self._visited_dir_keys = set()
+        self.stats = ScanStats()
+
         patterns: list[str] = list(self.fe.base_patterns)
         spec = self.fe.compile(patterns)
 

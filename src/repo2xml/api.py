@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import BinaryIO, Callable, Generator, List, Optional
@@ -54,29 +55,28 @@ class Repo2XML:
         """
         Format the <root_path> meta field based on config.
 
-        - absolute: full resolved path
-        - relative: relative to CWD when possible, else fall back to directory name
-        - redact: hide the path (privacy-friendly)
+        Output is always normalized to POSIX separators ("/") for reproducibility.
         """
         mode = self.config.root_path_mode
 
         if mode == RootPathMode.absolute:
-            return str(self.root_path)
+            return self.root_path.as_posix()
 
         if mode == RootPathMode.relative:
+            cwd = Path.cwd().resolve()
             try:
-                rel = self.root_path.relative_to(Path.cwd().resolve())
-                rel_str = rel.as_posix()
-                return rel_str if rel_str else "."
+                rel = os.path.relpath(self.root_path, cwd)
+                rel = rel.replace("\\", "/")
+                return rel if rel else "."
             except Exception:
                 # Fall back to directory name (still more private than full absolute).
-                return self.root_path.name or "."
+                return (self.root_path.name or ".").replace("\\", "/")
 
         if mode == RootPathMode.redact:
             return "<redacted>"
 
         # Defensive fallback (should not happen).
-        return str(self.root_path)
+        return self.root_path.as_posix()
 
     def export(
         self,
@@ -183,6 +183,9 @@ class Repo2XML:
             node.path,
             max_size=self.config.max_file_size,
             newline_mode=self.config.newline.value,
+            use_ext_fastpath=self.config.binary_ext_fastpath,
+            binary_ext_add=self.config.binary_ext_add,
+            binary_ext_remove=self.config.binary_ext_remove,
         )
 
         if res.kind == "text":
