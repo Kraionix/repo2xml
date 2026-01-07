@@ -18,6 +18,7 @@ from repo2xml.config import (
     Mode,
     NewlineMode,
     Repo2XMLConfig,
+    RootPathMode,
     SymlinkFilesMode,
 )
 from repo2xml.cli.ui import LogLevel, setup_logging
@@ -134,6 +135,11 @@ def main(
         "--no-timestamp",
         help="Do not emit generated_at_utc (for deterministic output).",
     ),
+    root_path_mode: RootPathMode = typer.Option(
+        RootPathMode.absolute,
+        "--root-path-mode",
+        help="How to represent <root_path>: absolute|relative|redact.",
+    ),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
@@ -228,6 +234,7 @@ def main(
         binary=binary,
         newline=newline,
         include_timestamp=not no_timestamp,
+        root_path_mode=root_path_mode,
         use_gitignore=gitignore,
         ignore_patterns=user_ignore,
         include_patterns=list(include) if include else [],

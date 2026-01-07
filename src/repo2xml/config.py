@@ -39,6 +39,19 @@ class SymlinkFilesMode(str, Enum):
     as_link = "as-link"   # emit metadata only + link target, no content reads
 
 
+class RootPathMode(str, Enum):
+    """
+    How to represent <root_path> in the XML meta block.
+
+    - absolute: full resolved path (default)
+    - relative: relative to current working directory when possible
+    - redact: hide path completely (privacy-friendly)
+    """
+    absolute = "absolute"
+    relative = "relative"
+    redact = "redact"
+
+
 @dataclass(slots=True)
 class Repo2XMLConfig:
     """
@@ -52,6 +65,7 @@ class Repo2XMLConfig:
 
     # Meta output
     include_timestamp: bool = True
+    root_path_mode: RootPathMode = RootPathMode.absolute
 
     # Filtering
     use_gitignore: bool = True

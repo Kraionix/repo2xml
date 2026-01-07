@@ -195,12 +195,24 @@ class XMLSerializer:
             f"{self._indent(2)}</file>{nl}"
         )
 
-    def serialize_binary_base64(self, node: FileNode, b64: str) -> str:
-        """Emit binary content as base64 text."""
+    def serialize_binary_base64_open(self, node: FileNode) -> str:
+        """
+        Emit the opening tags for a binary file with base64 content.
+
+        The caller is responsible for writing base64 chunks and then calling
+        serialize_binary_base64_close().
+        """
         nl = self.nl
         return (
             f'{self._indent(2)}<file {self._file_attr_str(node)} binary="true">{nl}'
-            f'{self._indent(3)}<content encoding="base64">{b64}</content>{nl}'
+            f'{self._indent(3)}<content encoding="base64">'
+        )
+
+    def serialize_binary_base64_close(self) -> str:
+        """Emit closing tags for a streamed base64 content file."""
+        nl = self.nl
+        return (
+            f"</content>{nl}"
             f"{self._indent(2)}</file>{nl}"
         )
 

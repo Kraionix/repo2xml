@@ -4,7 +4,7 @@ import base64
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Iterable, Literal, Optional
 
 # Number of bytes used for binary/encoding heuristics.
 SNIFF_BYTES = 4096
@@ -17,6 +17,33 @@ _BOMS: list[tuple[bytes, str]] = [
     (b"\xff\xfe", "utf-16-le"),
     (b"\xfe\xff", "utf-16-be"),
 ]
+
+# High-confidence binary extensions for quick classification.
+# This is intentionally conservative: avoid ambiguous formats that can be plain text.
+_BINARY_EXTS: set[str] = {
+    # Images
+    ".png", ".jpg", "jxl", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".tiff", ".tif",
+    # Audio/Video
+    ".mp3", ".wav", ".flac", ".ogg", ".m4a",
+    ".mp4", ".mkv", ".avi", ".mov", ".webm",
+    # Archives / compressed
+    ".zip", ".gz", ".bz2", ".xz", ".7z", ".rar",
+    # Documents
+    ".pdf",
+    # Fonts
+    ".ttf", ".otf", ".woff", ".woff2",
+    # Executables / libs
+    ".exe", ".dll", ".so", ".dylib",
+    # Bytecode / data
+    ".pyc", ".pyo", ".class",
+    # Misc
+    ".bin", ".dat",
+}
+
+# Common compound suffixes (Path.suffix only returns last part).
+_BINARY_COMPOUND_SUFFIXES: set[str] = {
+    ".tar.gz", ".tar.bz2", ".tar.xz",
+}
 
 
 def _detect_bom(data: bytes) -> Optional[str]:
@@ -58,13 +85,33 @@ def _looks_binary(sample: bytes, bom_encoding: Optional[str]) -> bool:
     return (nontext / len(sample)) > 0.30
 
 
+def _is_likely_binary_by_extension(path: Path) -> bool:
+    """
+    Fast-path: classify obvious binary formats by filename extension.
+
+    This helps avoid unnecessary IO and decoding attempts for files that are
+    almost certainly binary.
+    """
+    suffixes = [s.lower() for s in path.suffixes]
+    if not suffixes:
+        return False
+
+    # Compound suffix match (".tar.gz" etc).
+    if len(suffixes) >= 2:
+        comp = "".join(suffixes[-2:])
+        if comp in _BINARY_COMPOUND_SUFFIXES:
+            return True
+
+    return suffixes[-1] in _BINARY_EXTS
+
+
 @dataclass(slots=True)
 class IngestResult:
     """
     Output of FileIngestor.read().
 
     - kind="text": decoded text available in `text`
-    - kind="binary": raw bytes available in `binary_bytes`
+    - kind="binary": binary detected (content is not read into memory)
     - kind="skip": file intentionally skipped (size limit, etc.)
     - kind="error": failed to read/decode
     """
@@ -80,7 +127,8 @@ class FileIngestor:
     Read file content in a robust way.
 
     Design notes:
-    - Reads bytes once (single pass).
+    - Uses size limit to avoid large reads.
+    - Uses extension-based binary fast path (high confidence).
     - Uses BOM detection to decode UTF-16/32 correctly.
     - Supports newline normalization to reduce prompt noise.
     """
@@ -101,18 +149,25 @@ class FileIngestor:
         if st.st_size > max_size:
             return IngestResult(kind="skip", error=f"Skipped: File size {st.st_size} exceeds limit {max_size}")
 
-        # Read bytes once.
+        # Fast-path binary classification by extension (no reads).
+        if _is_likely_binary_by_extension(path):
+            return IngestResult(kind="binary")
+
+        # Read a small sample for heuristics and BOM detection.
         try:
-            raw = path.read_bytes()
+            with open(path, "rb") as f:
+                sample = f.read(SNIFF_BYTES)
+
+                bom_enc = _detect_bom(sample)
+                if _looks_binary(sample, bom_enc):
+                    return IngestResult(kind="binary")
+
+                # Text path: we already have a size cap, so reading the rest is acceptable.
+                rest = f.read()
         except OSError as e:
             return IngestResult(kind="error", error=f"Error reading file: {e}")
 
-        sample = raw[:SNIFF_BYTES]
-        bom_enc = _detect_bom(sample)
-
-        if _looks_binary(sample, bom_enc):
-            return IngestResult(kind="binary", binary_bytes=raw)
-
+        raw = sample + rest
         enc = bom_enc or "utf-8"
         try:
             text = raw.decode(enc, errors="replace")
@@ -124,6 +179,44 @@ class FileIngestor:
             text = text.replace("\r\n", "\n").replace("\r", "\n")
 
         return IngestResult(kind="text", text=text, encoding=enc)
+
+    @staticmethod
+    def sha256_file(path: Path, *, chunk_size: int = 1024 * 64) -> str:
+        """Compute SHA-256 hex digest for a file in a streaming fashion."""
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                h.update(chunk)
+        return h.hexdigest()
+
+    @staticmethod
+    def iter_base64_chunks(path: Path, *, chunk_size: int = 1024 * 64) -> Iterable[str]:
+        """
+        Yield base64 ASCII chunks for a file, streaming.
+
+        We keep the chunk boundary aligned to 3 bytes (base64 quantum) to avoid
+        inserting padding in the middle.
+        """
+        rem = b""
+        with open(path, "rb") as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+
+                data = rem + chunk
+                n = (len(data) // 3) * 3
+                block = data[:n]
+                rem = data[n:]
+
+                if block:
+                    yield base64.b64encode(block).decode("ascii")
+
+        if rem:
+            yield base64.b64encode(rem).decode("ascii")
 
     @staticmethod
     def to_base64(data: bytes) -> str:

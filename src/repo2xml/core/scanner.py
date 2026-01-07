@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Generator, Optional, Set
 
@@ -9,6 +10,52 @@ from .domain import FileNode
 from .filters import FilterEngine
 
 logger = logging.getLogger("repo2xml.scanner")
+
+
+@dataclass(slots=True)
+class ScanStats:
+    """
+    Scanner statistics for visibility without log spam.
+
+    We avoid logging per-file errors, because on some systems (Windows locks, permissions)
+    this can easily produce thousands of lines. Instead we collect counters and emit a
+    single summary warning after scanning.
+    """
+    dirs_scandir_errors: int = 0
+    entry_is_symlink_errors: int = 0
+    entry_is_dir_errors: int = 0
+    entry_is_file_errors: int = 0
+    entry_stat_errors: int = 0
+    entry_readlink_errors: int = 0
+
+    def has_issues(self) -> bool:
+        return any(
+            x > 0
+            for x in (
+                self.dirs_scandir_errors,
+                self.entry_is_symlink_errors,
+                self.entry_is_dir_errors,
+                self.entry_is_file_errors,
+                self.entry_stat_errors,
+                self.entry_readlink_errors,
+            )
+        )
+
+    def summary(self) -> str:
+        parts: list[str] = []
+        if self.dirs_scandir_errors:
+            parts.append(f"dirs_scandir_errors={self.dirs_scandir_errors}")
+        if self.entry_is_symlink_errors:
+            parts.append(f"entry_is_symlink_errors={self.entry_is_symlink_errors}")
+        if self.entry_is_dir_errors:
+            parts.append(f"entry_is_dir_errors={self.entry_is_dir_errors}")
+        if self.entry_is_file_errors:
+            parts.append(f"entry_is_file_errors={self.entry_is_file_errors}")
+        if self.entry_stat_errors:
+            parts.append(f"entry_stat_errors={self.entry_stat_errors}")
+        if self.entry_readlink_errors:
+            parts.append(f"entry_readlink_errors={self.entry_readlink_errors}")
+        return ", ".join(parts) if parts else "no issues"
 
 
 class RepositoryScanner:
@@ -45,6 +92,9 @@ class RepositoryScanner:
         # Cycle protection: track visited directories by (dev, ino) when available,
         # otherwise by resolved path string. This matters when following symlink dirs.
         self._visited_dir_keys: set[tuple[int, int] | str] = set()
+
+        # Collected stats for post-scan summary logging.
+        self.stats = ScanStats()
 
     def _dir_key(self, p: Path) -> tuple[int, int] | str:
         """
@@ -97,6 +147,7 @@ class RepositoryScanner:
         except OSError as e:
             # Permissions / transient filesystem errors: skip this directory.
             # Keep scanning other directories (fail-soft), but make it visible to users.
+            self.stats.dirs_scandir_errors += 1
             logger.warning("Cannot read directory: %s (%s)", dir_abs, e)
             if pushed:
                 del patterns[-pushed:]
@@ -118,12 +169,14 @@ class RepositoryScanner:
             try:
                 is_symlink = entry.is_symlink()
             except OSError:
+                self.stats.entry_is_symlink_errors += 1
                 is_symlink = False
 
             # Directory handling (do not follow symlink dirs unless enabled).
             try:
                 is_dir_no_follow = entry.is_dir(follow_symlinks=False)
             except OSError:
+                self.stats.entry_is_dir_errors += 1
                 is_dir_no_follow = False
 
             if is_dir_no_follow:
@@ -157,6 +210,7 @@ class RepositoryScanner:
             try:
                 is_file = entry.is_file(follow_symlinks=True)
             except OSError:
+                self.stats.entry_is_file_errors += 1
                 continue
 
             if not is_file:
@@ -170,6 +224,7 @@ class RepositoryScanner:
                 try:
                     symlink_target = os.readlink(entry.path)
                 except OSError:
+                    self.stats.entry_readlink_errors += 1
                     symlink_target = None
 
             # File stat: we follow symlinks here to get stable metadata about the target file.
@@ -177,6 +232,7 @@ class RepositoryScanner:
             try:
                 st = entry.stat(follow_symlinks=True)
             except OSError:
+                self.stats.entry_stat_errors += 1
                 continue
 
             yield FileNode(

@@ -22,9 +22,12 @@ Convert a source code repository into a single, structured XML context for LLM i
   - Safe directory traversal with cycle protection.
 - **Fault Tolerance**: Read errors (permissions, encoding) do not crash the tool; they are reported as `<error>` tags within the XML.
 - **Binary handling**: skip, embed as base64, or store SHA-256 hash.
+  - `base64` and `hash` are computed in a streaming fashion (no full binary read into memory).
 - **Formatting modes**: `compact` (default), `pretty` (indented), or `minify`.
 - **Output**: File or stdout; optional gzip/zstd compression.
-- **Deterministic output option**: `--no-timestamp` omits `generated_at_utc` for stable diffs.
+- **Deterministic output options**:
+  - `--no-timestamp` omits `generated_at_utc` for stable diffs.
+  - `--root-path-mode relative|redact` avoids leaking absolute paths.
 
 ## Installation
 
@@ -52,16 +55,22 @@ Generate full XML for the current directory (default):
 repo2xml -o context.xml
 ```
 
+Run as a module:
+
+```bash
+python -m repo2xml -o context.xml .
+```
+
 Generate full XML with explicit path and settings:
 
 ```bash
 repo2xml --mode full --formatting compact --newline lf -o context.xml ./my-project
 ```
 
-Deterministic output (omit timestamp):
+Deterministic output (omit timestamp and redact root path):
 
 ```bash
-repo2xml --no-timestamp -o context.xml .
+repo2xml --no-timestamp --root-path-mode redact -o context.xml .
 ```
 
 Structure only (fast, no file reads, useful for initial LLM prompts):
@@ -115,6 +124,12 @@ repo2xml --help
 - `--no-timestamp`
   Omit `<generated_at_utc>` from the XML meta block, for deterministic output.
 
+- `--root-path-mode [absolute|relative|redact]`
+  How to emit `<root_path>`:
+  - `absolute` (default): full resolved path
+  - `relative`: relative to the current working directory when possible
+  - `redact`: emit `<redacted>`
+
 ### Filtering
 
 - `--gitignore / --no-gitignore`
@@ -156,22 +171,15 @@ The output is a single XML document.
     <generated_at_utc>...</generated_at_utc>
   </meta>
 
-  <!-- Complete Directory Tree -->
   <project_structure>
     <dir name="src" path="src">
       <file name="main.py" path="src/main.py" />
     </dir>
   </project_structure>
 
-  <!-- File Contents -->
   <files mode="full">
     <file path="src/main.py" size="1024" ext=".py" mtime_utc="...">
-      <content><![CDATA[ ... file content ... ]]]]><![CDATA[></content>
-    </file>
-
-    <!-- Example of skipped/error file -->
-    <file path="bin/image.png" size="..." ext=".png" mtime_utc="..." skipped="true">
-       <error>Skipped: Binary file detected</error>
+      <content><![CDATA[ ... ]]></content>
     </file>
   </files>
 </repository_context>
@@ -186,8 +194,9 @@ Paths in XML are always repository-relative and use POSIX separators (`/`), even
 `repo2xml` employs a "fail-soft" strategy:
 1.  **Access Errors:** If a file cannot be read (permissions, locks), it is reported as an `<error>` in the XML, but processing continues.
 2.  **Directory Access Errors:** If a directory cannot be listed (permissions, transient errors), it is skipped and a warning is logged.
-3.  **Encoding:** It attempts to detect encodings (BOM) and falls back to UTF-8 with replacement characters. It does not crash on binary garbage in text files.
-4.  **XML Safety:** Content is wrapped in CDATA.
+3.  **Scanner Entry Errors:** If a directory entry fails `is_file/stat/readlink`, it is skipped. A summary warning is logged after scanning (without spamming per file).
+4.  **Encoding:** It attempts to detect encodings (BOM) and falls back to UTF-8 with replacement characters. It does not crash on binary garbage in text files.
+5.  **XML Safety:** Content is wrapped in CDATA.
 
 ## Performance Notes
 
