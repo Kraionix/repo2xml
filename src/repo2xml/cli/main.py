@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import gzip
 import sys
+import io
+import pyperclip
 from enum import Enum
 from pathlib import Path
 from typing import BinaryIO, Callable, List, Optional
@@ -99,12 +101,18 @@ def main(
         "context.xml",
         "--output",
         "-o",
-        help="Output path (ignored if --stdout).",
+        help="Output path (ignored if --stdout or --clipboard).",
     ),
     stdout: bool = typer.Option(
         False,
         "--stdout",
         help="Write output to stdout.",
+    ),
+    clipboard: bool = typer.Option(
+        False,
+        "--clipboard",
+        "-c",
+        help="Copy output to system clipboard instead of file.",
     ),
     compress: CompressMode = typer.Option(
         CompressMode.none,
@@ -200,7 +208,9 @@ def main(
     user_ignore = list(ignore) if ignore else []
     
     # Auto-exclude output file to prevent self-inclusion loop
-    if not stdout:
+    # Only relevant if we are writing to a file, but we add it just in case
+    # to maintain consistency across modes.
+    if not stdout and not clipboard:
         rel_out = _try_relpath(out_abs, root)
         if rel_out:
             user_ignore.append(rel_out)
@@ -234,7 +244,33 @@ def main(
             raise typer.Exit(code=130)
         return
 
-    # Output setup
+    # 1. Clipboard Mode
+    if clipboard:
+        logger.info("Mode: Clipboard. Buffering output...")
+        mem_buffer = io.BytesIO()
+        
+        try:
+            if progress:
+                with tqdm(desc="Processing", unit="file") as pbar:
+                    engine.export(mem_buffer, progress_callback=lambda n: pbar.update(n))
+            else:
+                engine.export(mem_buffer)
+            
+            # Decode (XML is text) and copy
+            xml_content = mem_buffer.getvalue().decode("utf-8")
+            pyperclip.copy(xml_content)
+            logger.info("Success! XML context copied to clipboard (%d chars).", len(xml_content))
+            
+        except pyperclip.PyperclipException as e:
+            logger.error("Clipboard error: %s", e)
+            logger.error("On Linux, ensure xclip or xsel is installed.")
+            raise typer.Exit(code=1)
+        except Exception as e:
+            logger.error("Fatal error during clipboard export: %s", e)
+            raise typer.Exit(code=1)
+        return
+
+    # 2. Standard File / Stdout Mode
     try:
         out_stream, closer = _open_output_stream(
             output_path=out_abs,
@@ -245,7 +281,6 @@ def main(
         typer.secho("zstd compression requires: pip install zstandard", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
 
-    # Execution with Progress Bar
     try:
         if progress:
             # Wrap progress callback
