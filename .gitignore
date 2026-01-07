@@ -1,0 +1,50 @@
+# --- Python bytecode / caches ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Virtual environments ---
+.venv/
+venv/
+.env/
+.conda/
+.python-version
+
+# --- Build / packaging ---
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+wheelhouse/
+
+# --- Test / coverage ---
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+
+# --- Type check / linters ---
+.mypy_cache/
+.pyre/
+.ruff_cache/
+
+# --- IDEs / editors ---
+.vscode/
+.idea/
+*.iml
+
+# --- OS junk ---
+.DS_Store
+Thumbs.db
+
+# --- repo2xml outputs ---
+context.xml
+context*.xml
+output_context.xml
+*.xml.gz
+*.xml.zst
+*.gz
+*.zst
