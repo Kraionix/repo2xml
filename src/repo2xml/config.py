@@ -65,7 +65,10 @@ class Repo2XMLConfig:
     Design note:
     This config intentionally stays "simple data". Component wiring and orchestration
     happens in the facade/pipeline layers.
+
+    The config can be validated/normalized to enforce invariants early.
     """
+
     # Output selection (future-proof; currently only "xml" is implemented)
     format: str = "xml"
 
@@ -105,6 +108,52 @@ class Repo2XMLConfig:
     max_base64_size: int = 100_000
     max_hash_size: int = 0
 
-    # Optional text processors (text-only). Not exposed via CLI yet.
+    # Output write buffering (in characters). Reduces overhead of many small writes.
+    # 0 disables additional buffering (TextIOWrapper still buffers at the IO layer).
+    write_buffer_chars: int = 64_000
+
+    # If enabled, CLI may print a more detailed report (breakdown of skip/error causes).
+    report: bool = False
+
+    # Optional text processors (text-only). Not exposed via CLI by default.
     # Processors are applied in order to ingested text content.
     text_processors: List[TextProcessor] = field(default_factory=list)
+
+    def normalize(self) -> None:
+        """
+        Normalize configuration fields in-place.
+
+        This should be cheap and safe to call multiple times.
+        """
+        self.format = (self.format or "xml").strip().lower()
+
+        # Deduplicate hard excludes while preserving order.
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for d in self.hard_exclude_dirs:
+            if d not in seen:
+                seen.add(d)
+                deduped.append(d)
+        self.hard_exclude_dirs = deduped
+
+    def validate(self) -> None:
+        """
+        Validate configuration invariants and raise ValueError on invalid input.
+
+        This is intentionally strict: better to fail early than to produce confusing output.
+        """
+        if self.max_text_size < 0:
+            raise ValueError("max_text_size must be >= 0")
+        if self.max_base64_size < 0:
+            raise ValueError("max_base64_size must be >= 0")
+        if self.max_hash_size < 0:
+            raise ValueError("max_hash_size must be >= 0")
+        if self.write_buffer_chars < 0:
+            raise ValueError("write_buffer_chars must be >= 0")
+
+        if not self.format:
+            raise ValueError("format must not be empty")
+
+        # Structure-only mode is compatible with any binary/text settings, but we still
+        # validate numeric invariants above.
+        # Additional cross-field validation can be added later (e.g. format capabilities).

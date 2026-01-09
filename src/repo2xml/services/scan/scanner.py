@@ -62,14 +62,9 @@ class FileSystemScanner:
     """
     Single-pass filesystem scanner with an on-the-fly gitignore stack.
 
-    Key behaviors:
-    - Only one filesystem traversal (no pre-scan for .gitignore files).
-    - When entering a directory, read its .gitignore (if enabled) and push rules.
-    - When leaving a directory, pop those rules.
-    - Supports:
-        - follow / not follow symlink directories (with cycle protection)
-        - symlink file handling: follow | skip | as-link
-        - hard-exclude directory names (always skipped)
+    Optimization note:
+    We try to reduce syscalls by applying ignore checks early. If an entry is ignored by
+    its path alone, we skip it before calling is_dir/is_file/stat where possible.
     """
 
     def __init__(
@@ -165,6 +160,11 @@ class FileSystemScanner:
             rel = f"{dir_rel}/{name}" if dir_rel else name
             rel = rel.replace("\\", "/")
 
+            # Early ignore check by path. If it matches, we can skip without touching the entry.
+            # This reduces syscalls/cost for ignored trees on some platforms.
+            if spec.match_file(rel):
+                continue
+
             try:
                 is_symlink = entry.is_symlink()
             except OSError:
@@ -188,10 +188,9 @@ class FileSystemScanner:
                 if is_symlink and not self.follow_symlinks_dirs:
                     continue
 
-                # Pruning: if the directory is ignored, do not descend.
-                # Note: this is an approximation of git behavior; re-includes inside ignored
-                # directories may require explicitly un-ignoring the directory path itself.
-                if spec.match_file(rel) or spec.match_file(rel + "/"):
+                # Pruning: if the directory is ignored by directory-only patterns, do not descend.
+                # We already checked spec.match_file(rel) above.
+                if spec.match_file(rel + "/"):
                     continue
 
                 child_dir = Path(entry.path)
@@ -216,9 +215,6 @@ class FileSystemScanner:
                 continue
 
             if not is_file:
-                continue
-
-            if spec.match_file(rel):
                 continue
 
             symlink_target: Optional[str] = None

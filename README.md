@@ -34,6 +34,8 @@ The internal architecture is pipeline-based (Scan → Ingest → Serialize → W
   - `--no-timestamp` omits `generated_at_utc` for stable diffs.
   - `--root-path-mode relative|redact` avoids leaking absolute paths.
   - `<root_path>` always uses POSIX separators (`/`) for reproducibility.
+- **Built-in safety**:
+  - `--redact-secrets` redacts common secret-like patterns (best-effort) from embedded text.
 
 ## Installation
 
@@ -103,6 +105,16 @@ repo2xml --help
 
   Note: binary hashing (`--binary hash`) is allowed beyond `--max-size` by default.
 
+### Reporting
+
+- `--report / --no-report`
+  Print a detailed post-run report with a breakdown of skip/error causes.
+
+### Redaction
+
+- `--redact-secrets / --no-redact-secrets`
+  Redact common secret-like patterns from embedded text content (best-effort).
+
 ### Binary detection fast-path
 
 - `--ext-binary-detect / --no-ext-binary-detect`
@@ -113,7 +125,7 @@ repo2xml --help
   Examples: `--binary-ext-add PSD`, `--binary-ext-add .psd`, `--binary-ext-add .tar.zst`
 
 - `--binary-ext-remove TEXT`
-  Remove extensions from the default binary fast-path set (repeatable). Case-insensitive.
+  Remove extensions from the default binary fast-path set (repeatable).
   Example: `--binary-ext-remove .pdf`
 
 ## Output Format
@@ -148,20 +160,6 @@ from repo2xml import Repo2XML, Repo2XMLConfig
 engine = Repo2XML(Path("."), Repo2XMLConfig())
 with open("context.xml", "wb") as f:
     stats = engine.export(f)
-
-print(stats)
-```
-
-Progress example (tqdm reporter):
-
-```python
-from pathlib import Path
-from repo2xml import Repo2XML, Repo2XMLConfig
-from repo2xml.application.progress import TqdmProgressReporter
-
-engine = Repo2XML(Path("."), Repo2XMLConfig())
-with open("context.xml", "wb") as f:
-    stats = engine.export(f, progress=TqdmProgressReporter())
 
 print(stats)
 ```

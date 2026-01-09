@@ -5,7 +5,7 @@ import hashlib
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
-from repo2xml.domain.model import SniffResult, TextReadResult
+from repo2xml.domain.model import ErrorCode, ErrorInfo, SkipCode, SkipInfo, SniffResult, TextReadResult
 
 # Number of bytes used for binary/encoding heuristics.
 SNIFF_BYTES = 4096
@@ -165,7 +165,7 @@ class StandardIngestor:
 
     Design notes:
     - sniff(): low-cost classification (binary vs text) using extension fast-path and a small sample.
-    - read_text(): bounded read of the full text file with size limits and newline normalization.
+    - read_text(): bounded read of a text file with size limits and newline normalization.
     - Hash/base64 utilities are streaming and can be used by the pipeline when needed.
     """
 
@@ -199,7 +199,8 @@ class StandardIngestor:
             with open(path, "rb") as f:
                 sample = f.read(SNIFF_BYTES)
         except OSError as e:
-            return SniffResult(kind="error", reason=f"Error reading file sample: {e}")
+            err = ErrorInfo(code=ErrorCode.sniff_read_error, detail={"os_error": str(e)})
+            return SniffResult(kind="error", error=err)
 
         bom_enc = _detect_bom(sample)
         if _looks_binary(sample, bom_enc):
@@ -217,10 +218,12 @@ class StandardIngestor:
         try:
             st = path.stat()
         except OSError as e:
-            return TextReadResult(kind="error", reason=f"Error stat file: {e}")
+            err = ErrorInfo(code=ErrorCode.stat_error, detail={"os_error": str(e)})
+            return TextReadResult(kind="error", error=err)
 
         if st.st_size > max_size:
-            return TextReadResult(kind="skip", reason=f"Skipped: File size {st.st_size} exceeds limit {max_size}")
+            info = SkipInfo(code=SkipCode.text_size_limit, detail={"size": st.st_size, "limit": max_size})
+            return TextReadResult(kind="skip", skipped=info)
 
         try:
             with open(path, "rb") as f:
@@ -229,11 +232,13 @@ class StandardIngestor:
 
                 # Safety check: avoid embedding binary even if caller classified it incorrectly.
                 if _looks_binary(sample, bom_enc):
-                    return TextReadResult(kind="error", reason="Binary file detected during text read")
+                    err = ErrorInfo(code=ErrorCode.binary_detected, detail={})
+                    return TextReadResult(kind="error", error=err)
 
                 rest = f.read()
         except OSError as e:
-            return TextReadResult(kind="error", reason=f"Error reading file: {e}")
+            err = ErrorInfo(code=ErrorCode.text_read_error, detail={"os_error": str(e)})
+            return TextReadResult(kind="error", error=err)
 
         buf = bytearray(sample)
         buf.extend(rest)
@@ -242,7 +247,8 @@ class StandardIngestor:
         try:
             text = buf.decode(enc, errors="replace")
         except Exception as e:
-            return TextReadResult(kind="error", reason=f"Error decoding with {enc}: {e}")
+            err = ErrorInfo(code=ErrorCode.text_decode_error, detail={"encoding": enc, "decode_error": str(e)})
+            return TextReadResult(kind="error", error=err)
 
         if self.newline_mode == "lf":
             # Normalize CRLF/CR to LF for more stable diffs and fewer prompt tokens.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Iterable, Literal, Optional, Union
 
@@ -33,16 +34,64 @@ class ExportMeta:
     root_path: str
     generated_at_utc: Optional[str]
     tool_version: str
-    schema_version: str = "1.0"
+    schema_version: str
+
+
+class SkipCode(str, Enum):
+    """Machine-readable reasons for intentionally skipping file content."""
+    binary_skip_mode = "binary_skip_mode"
+    text_size_limit = "text_size_limit"
+    base64_size_limit = "base64_size_limit"
+    hash_size_limit = "hash_size_limit"
+    unknown = "unknown"
+
+
+class ErrorCode(str, Enum):
+    """Machine-readable reasons for failed processing attempts."""
+    sniff_read_error = "sniff_read_error"
+    stat_error = "stat_error"
+    text_read_error = "text_read_error"
+    text_decode_error = "text_decode_error"
+    binary_detected = "binary_detected"
+    binary_hash_error = "binary_hash_error"
+    base64_error = "base64_error"
+    processor_error = "processor_error"
+    unknown = "unknown"
+
+
+@dataclass(slots=True)
+class SkipInfo:
+    """
+    Structured skip information produced by low-level components.
+
+    The pipeline is responsible for turning this into a user-facing message.
+    """
+    code: SkipCode
+    detail: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ErrorInfo:
+    """
+    Structured error information produced by low-level components.
+
+    The pipeline is responsible for turning this into a user-facing message.
+    """
+    code: ErrorCode
+    detail: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
 class ExportStats:
-    """Execution statistics."""
+    """Execution statistics with cause breakdown."""
     files_total: int
     files_emitted: int
     files_skipped: int
     files_errors: int
+
+    skipped_by_code: dict[str, int] = field(default_factory=dict)
+    errors_by_code: dict[str, int] = field(default_factory=dict)
+
     scan_warning_summary: Optional[str] = None
 
 
@@ -55,7 +104,7 @@ class SniffResult:
     """
     kind: Literal["text", "binary", "error"]
     encoding: Optional[str] = None
-    reason: Optional[str] = None
+    error: Optional[ErrorInfo] = None
 
 
 @dataclass(slots=True)
@@ -64,7 +113,8 @@ class TextReadResult:
     kind: Literal["text", "skip", "error"]
     text: Optional[str] = None
     encoding: Optional[str] = None
-    reason: Optional[str] = None
+    skipped: Optional[SkipInfo] = None
+    error: Optional[ErrorInfo] = None
 
 
 # Payloads represent how a file should be emitted by a serializer.
@@ -127,7 +177,9 @@ class SkippedPayload:
     - This is an intentional omission (size limits, binary skip mode, etc.).
     - Serializers should mark the entry as skipped.
     """
-    reason: str
+    code: SkipCode
+    message: str
+    detail: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -139,7 +191,9 @@ class ErrorPayload:
     - This is a failed attempt to process a file (read/decode/hash errors, etc.).
     - Serializers should mark the entry as skipped/error.
     """
+    code: ErrorCode
     message: str
+    detail: dict[str, object] = field(default_factory=dict)
 
 
 FilePayload = Union[

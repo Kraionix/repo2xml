@@ -3,10 +3,10 @@ from __future__ import annotations
 import io
 import logging
 from pathlib import Path
-from typing import BinaryIO, Callable, Generator, Optional
+from typing import BinaryIO, Generator, Optional
 
 from repo2xml.application.pipeline import ExportPipeline
-from repo2xml.application.progress import CallbackProgressReporter, NullProgressReporter, ProgressReporter
+from repo2xml.application.progress import NullProgressReporter, ProgressReporter
 from repo2xml.config import Repo2XMLConfig
 from repo2xml.domain.model import ExportStats, FileEntry
 from repo2xml.services.ingest.ingestor import StandardIngestor
@@ -31,6 +31,10 @@ class Repo2XML:
     def __init__(self, root_path: Path, config: Repo2XMLConfig):
         self.root_path = root_path.resolve()
         self.config = config
+
+        # Normalize/validate config early.
+        self.config.normalize()
+        self.config.validate()
 
         self._gitignore_engine = GitignoreEngine(
             root_path=self.root_path,
@@ -76,7 +80,6 @@ class Repo2XML:
         output_stream: BinaryIO,
         *,
         progress: Optional[ProgressReporter] = None,
-        progress_callback: Optional[Callable[[int], None]] = None,
     ) -> ExportStats:
         """
         Execute the full pipeline and write output bytes to output_stream.
@@ -84,19 +87,11 @@ class Repo2XML:
         Args:
             output_stream: A writable binary stream (file, stdout, BytesIO).
             progress: Optional ProgressReporter (supports total + finish).
-            progress_callback: Optional callback called with delta increments.
 
         Returns:
             ExportStats with per-run summary.
         """
-        reporter: ProgressReporter
-        if progress is not None:
-            reporter = progress
-        elif progress_callback is not None:
-            reporter = CallbackProgressReporter(progress_callback)
-        else:
-            reporter = NullProgressReporter()
-
+        reporter = progress or NullProgressReporter()
         return self._pipeline.execute(output_stream=output_stream, progress=reporter)
 
     def export_to_bytes(self) -> bytes:

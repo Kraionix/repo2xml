@@ -71,11 +71,6 @@ def _esc_attr(s: str) -> str:
 
 # CDATA markers are stored in base64 so this source code does not contain
 # the CDATA terminator literally (avoids self-rewriting when serializing this repo).
-#
-# Human-readable equivalents (spaced out intentionally):
-# - open: "< ! [ C D A T A ["
-# - close: "] ] >"
-# - split: "] ] ] ] > < ! [ C D A T A [ >"
 _CDATA_OPEN = base64.b64decode("PCFbQ0RBVEFb").decode("ascii")
 _CDATA_CLOSE = base64.b64decode("XV0+").decode("ascii")
 _CDATA_SPLIT = base64.b64decode("XV1dXT48IVtDREFUQVs+").decode("ascii")
@@ -175,7 +170,6 @@ class XMLSerializer:
             parts = rel.split("/")
             dir_parts, file_name = parts[:-1], parts[-1]
 
-            # Find common prefix depth between current stack and this file's dir path.
             common = 0
             max_common = min(len(stack), len(dir_parts))
             while common < max_common and stack[common] == dir_parts[common]:
@@ -183,7 +177,6 @@ class XMLSerializer:
 
             close_to(common)
 
-            # Open new directories.
             for i in range(common, len(dir_parts)):
                 stack.append(dir_parts[i])
                 dir_path = "/".join(stack)
@@ -193,7 +186,6 @@ class XMLSerializer:
                     f'path="{_esc_attr(dir_path)}">{nl}'
                 )
 
-            # Emit file node.
             file_level = base_level + len(stack)
             write(
                 f'{self._indent(file_level)}<file name="{_esc_attr(file_name)}" '
@@ -238,13 +230,13 @@ class XMLSerializer:
         i3 = self._indent(3)
 
         if isinstance(payload, MetadataPayload):
-            # Metadata mode semantics: normal file entry, no <content>, no skipped markers.
+            # Metadata semantics: normal file entry, no <content>, no skipped markers.
             attrs = self._file_attr_str(entry)
             write(f'{i2}<file {attrs} />{nl}')
             return
 
         if isinstance(payload, LinkPayload):
-            # Link-only entry for symlinks when configured as "as-link".
+            # Link-only semantics: normal file entry with link_only marker.
             attrs = self._file_attr_str(entry, link_target_override=payload.link_target)
             write(f'{i2}<file {attrs} link_only="true" />{nl}')
             return
@@ -267,7 +259,6 @@ class XMLSerializer:
             write(f'{i2}<file {attrs} binary="true">{nl}')
             write(f'{i3}<content encoding="base64">')
             for chunk in payload.chunks:
-                # Base64 chunks are ASCII and safe to write directly.
                 write(chunk)
             write(f"</content>{nl}")
             write(f"{i2}</file>{nl}")
@@ -275,7 +266,7 @@ class XMLSerializer:
 
         if isinstance(payload, SkippedPayload):
             write(f'{i2}<file {attrs} skipped="true">{nl}')
-            write(f"{i3}<error>{html.escape(_xml_sanitize_text(payload.reason))}</error>{nl}")
+            write(f"{i3}<error>{html.escape(_xml_sanitize_text(payload.message))}</error>{nl}")
             write(f"{i2}</file>{nl}")
             return
 
@@ -285,7 +276,6 @@ class XMLSerializer:
             write(f"{i2}</file>{nl}")
             return
 
-        # Defensive fallback
         write(f'{i2}<file {attrs} skipped="true">{nl}')
         write(f"{i3}<error>Unknown payload</error>{nl}")
         write(f"{i2}</file>{nl}")
