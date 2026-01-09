@@ -29,7 +29,7 @@ The internal architecture is pipeline-based (Scan → Ingest → Serialize → W
   - Case-insensitive (PNG == png).
   - Can be disabled or extended via CLI options.
 - **Formatting modes**: `compact` (default), `pretty` (indented), or `minify`.
-- **Output**: File or stdout; optional gzip/zstd compression.
+- **Output**: File or stdout; optional gzip/zstd compression; clipboard support.
 - **Deterministic output options**:
   - `--no-timestamp` omits `generated_at_utc` for stable diffs.
   - `--root-path-mode relative|redact` avoids leaking absolute paths.
@@ -75,6 +75,18 @@ Deterministic output (omit timestamp and redact root path):
 repo2xml --no-timestamp --root-path-mode redact -o context.xml .
 ```
 
+Show version:
+
+```bash
+repo2xml --version
+```
+
+Compute stats only (discard output bytes):
+
+```bash
+repo2xml --stats-only --report .
+```
+
 ## CLI Options
 
 Show help:
@@ -109,6 +121,17 @@ repo2xml --help
 
 - `--report / --no-report`
   Print a detailed post-run report with a breakdown of skip/error causes.
+
+- `--stats-only`
+  Compute and print statistics, but discard generated output bytes.
+
+### Progress
+
+- `--progress / --no-progress`
+  Show progress bars.
+  Progress is multi-phase:
+  - **Scanning**: indeterminate (no total), counts discovered files
+  - **Processing**: determinate, counts processed files
 
 ### Redaction
 

@@ -81,9 +81,16 @@ class ExportPipeline:
                 max_buffer_chars=self.config.write_buffer_chars,
             )
 
-            # Phase 1: scan
+            # Phase 1: scan (indeterminate progress, no total)
+            progress.set_phase("Scanning")
+            progress.set_total(None)
+
             logger.info("Scanning repository: %s", self.root_path)
-            entries: List[FileEntry] = list(self.scanner.scan())
+            entries: List[FileEntry] = []
+            for entry in self.scanner.scan():
+                entries.append(entry)
+                progress.advance(1)
+
             entries.sort(key=lambda e: e.rel_path)
 
             scan_warn: Optional[str] = None
@@ -93,8 +100,11 @@ class ExportPipeline:
                 logger.warning("Scan encountered filesystem errors (some entries skipped): %s", scan_warn)
 
             total = len(entries)
-            progress.set_total(total)
             logger.info("Found %d files.", total)
+
+            # Phase 2: serialize/process files (determinate progress with total)
+            progress.set_phase("Processing")
+            progress.set_total(total)
 
             # Meta
             generated_at = None
@@ -108,7 +118,6 @@ class ExportPipeline:
                 schema_version=SCHEMA_VERSION,
             )
 
-            # Phase 2: serialize
             self.serializer.write_header(meta, writer.write)
 
             if self.serializer.supports_structure:

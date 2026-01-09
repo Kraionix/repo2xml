@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import io
+from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import List, Optional
 
-import pyperclip
 import typer
 
 from repo2xml.application.progress import NullProgressReporter, TqdmProgressReporter
+from repo2xml.cli.ui import LogLevel, setup_logging
 from repo2xml.config import (
     BinaryMode,
     Formatting,
@@ -17,13 +17,28 @@ from repo2xml.config import (
     RootPathMode,
     SymlinkFilesMode,
 )
-from repo2xml.cli.ui import LogLevel, setup_logging
+from repo2xml.domain.exceptions import ConfigurationError, OutputError, Repo2XMLError, SerializationError
 from repo2xml.facade import Repo2XML
 from repo2xml.services.ingest.redact import redact_secrets
-from repo2xml.services.output.targets import CompressMode, open_output_stream
+from repo2xml.services.output.targets import (
+    ClipboardTarget,
+    CompressMode,
+    DevNullTarget,
+    FileTarget,
+    OutputTarget,
+    StdoutTarget,
+)
 from repo2xml.utils.paths import try_relpath_posix
 
 app = typer.Typer(add_completion=False)
+
+
+def _tool_version() -> str:
+    """Best-effort read package version from metadata."""
+    try:
+        return importlib_metadata.version("repo2xml")
+    except Exception:
+        return "0.0.0"
 
 
 def _print_breakdown(title: str, data: dict[str, int]) -> None:
@@ -34,8 +49,32 @@ def _print_breakdown(title: str, data: dict[str, int]) -> None:
         typer.echo(f"  - {k}: {v}")
 
 
+def _select_target(
+    *,
+    stdout: bool,
+    clipboard: bool,
+    stats_only: bool,
+    output_path: Path,
+    compress: CompressMode,
+) -> OutputTarget:
+    if stats_only:
+        return DevNullTarget()
+    if clipboard:
+        return ClipboardTarget()
+    if stdout:
+        return StdoutTarget(compress=compress)
+    return FileTarget(output_path, compress=compress)
+
+
 @app.callback(invoke_without_command=True)
 def main(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-V",
+        help="Show version and exit.",
+        is_eager=True,
+    ),
     path: Path = typer.Argument(
         ".",
         help="Root path of the project to serialize.",
@@ -48,7 +87,7 @@ def main(
         "context.xml",
         "--output",
         "-o",
-        help="Output path (ignored if --stdout or --clipboard).",
+        help="Output path (ignored if --stdout/--clipboard/--stats-only).",
     ),
     stdout: bool = typer.Option(
         False,
@@ -60,6 +99,11 @@ def main(
         "--clipboard",
         "-c",
         help="Copy output to system clipboard instead of file.",
+    ),
+    stats_only: bool = typer.Option(
+        False,
+        "--stats-only",
+        help="Compute and print statistics only (discard generated output).",
     ),
     compress: CompressMode = typer.Option(
         CompressMode.none,
@@ -180,17 +224,21 @@ def main(
     """
     repo2xml: convert a repository into a single context document for LLM ingestion.
     """
+    if version:
+        typer.echo(f"repo2xml {_tool_version()}")
+        raise typer.Exit(code=0)
+
     logger = setup_logging(log_level)
     root = path.resolve()
 
-    # Determine absolute output path for exclusion logic
+    # Determine absolute output path for exclusion logic (file target only).
     out_abs = output.resolve() if output.is_absolute() else (Path.cwd() / output).resolve()
 
     # Prepare ignore patterns
     user_ignore = list(ignore) if ignore else []
 
-    # Auto-exclude output file to prevent self-inclusion loop.
-    if not stdout and not clipboard:
+    # Auto-exclude output file to prevent self-inclusion loop (file output only).
+    if not stdout and not clipboard and not stats_only:
         rel_out = try_relpath_posix(out_abs, root)
         if rel_out:
             user_ignore.append("/" + rel_out)
@@ -201,32 +249,36 @@ def main(
     if redact:
         processors.append(redact_secrets)
 
-    config = Repo2XMLConfig(
-        format="xml",
-        mode=mode,
-        formatting=formatting,
-        binary=binary,
-        newline=newline,
-        include_timestamp=not no_timestamp,
-        root_path_mode=root_path_mode,
-        binary_ext_fastpath=ext_binary_detect,
-        binary_ext_add=list(binary_ext_add) if binary_ext_add else [],
-        binary_ext_remove=list(binary_ext_remove) if binary_ext_remove else [],
-        use_gitignore=gitignore,
-        ignore_patterns=user_ignore,
-        include_patterns=list(include) if include else [],
-        hard_exclude_dirs=hard_exclude,
-        follow_symlinks_dirs=follow_symlinks_dirs,
-        symlinks_files=symlinks_files,
-        max_text_size=max_size,
-        max_base64_size=max_size,
-        # Hashing is allowed beyond --max-size by default (0 = unlimited).
-        max_hash_size=0,
-        report=report,
-        text_processors=processors,
-    )
+    try:
+        config = Repo2XMLConfig(
+            format="xml",
+            mode=mode,
+            formatting=formatting,
+            binary=binary,
+            newline=newline,
+            include_timestamp=not no_timestamp,
+            root_path_mode=root_path_mode,
+            binary_ext_fastpath=ext_binary_detect,
+            binary_ext_add=list(binary_ext_add) if binary_ext_add else [],
+            binary_ext_remove=list(binary_ext_remove) if binary_ext_remove else [],
+            use_gitignore=gitignore,
+            ignore_patterns=user_ignore,
+            include_patterns=list(include) if include else [],
+            hard_exclude_dirs=hard_exclude,
+            follow_symlinks_dirs=follow_symlinks_dirs,
+            symlinks_files=symlinks_files,
+            max_text_size=max_size,
+            max_base64_size=max_size,
+            # Hashing is allowed beyond --max-size by default (0 = unlimited).
+            max_hash_size=0,
+            report=report,
+            text_processors=processors,
+        )
 
-    engine = Repo2XML(root, config)
+        engine = Repo2XML(root, config)
+    except ConfigurationError as e:
+        logger.error("Configuration error: %s", e)
+        raise typer.Exit(code=2)
 
     # Dry-run handling
     if dry_run:
@@ -239,57 +291,28 @@ def main(
             raise typer.Exit(code=130)
         return
 
-    # Clipboard Mode
-    if clipboard:
-        logger.info("Mode: Clipboard. Buffering output...")
-        mem_buffer = io.BytesIO()
+    target = _select_target(
+        stdout=stdout,
+        clipboard=clipboard,
+        stats_only=stats_only,
+        output_path=out_abs,
+        compress=compress,
+    )
 
-        try:
-            reporter = TqdmProgressReporter() if progress else NullProgressReporter()
-            stats = engine.export(mem_buffer, progress=reporter)
-
-            xml_content = mem_buffer.getvalue().decode("utf-8")
-            pyperclip.copy(xml_content)
-
-            logger.info("Success! Context copied to clipboard (%d chars).", len(xml_content))
-            logger.info(
-                "Stats: total=%d, emitted=%d, skipped=%d, errors=%d",
-                stats.files_total,
-                stats.files_emitted,
-                stats.files_skipped,
-                stats.files_errors,
-            )
-
-            if report:
-                _print_breakdown("Skipped by cause:", stats.skipped_by_code)
-                _print_breakdown("Errors by cause:", stats.errors_by_code)
-
-        except pyperclip.PyperclipException as e:
-            logger.error("Clipboard error: %s", e)
-            logger.error("On Linux, ensure xclip or xsel is installed.")
-            raise typer.Exit(code=1)
-        except Exception as e:
-            logger.error("Fatal error during clipboard export: %s", e)
-            raise typer.Exit(code=1)
-        return
-
-    # File / Stdout Mode
-    try:
-        out_stream, closer = open_output_stream(
-            output_path=out_abs,
-            use_stdout=stdout,
-            compress=compress,
-        )
-    except ImportError:
-        typer.secho("zstd compression requires: pip install zstandard", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=2)
+    reporter = TqdmProgressReporter() if progress else NullProgressReporter()
 
     try:
-        reporter = TqdmProgressReporter() if progress else None
-        stats = engine.export(out_stream, progress=reporter)
+        with target.open() as out_stream:
+            stats = engine.export(out_stream, progress=reporter)
 
-        if not stdout:
-            logger.info("Done. Output written to: %s", out_abs)
+        # User-facing summary
+        if stats_only:
+            logger.info("Done. Output discarded (%s).", target.describe())
+        elif stdout:
+            # Nothing to announce; stdout already emitted.
+            pass
+        else:
+            logger.info("Done. Output written to: %s", target.describe())
 
         logger.info(
             "Stats: total=%d, emitted=%d, skipped=%d, errors=%d",
@@ -308,11 +331,13 @@ def main(
     except KeyboardInterrupt:
         logger.warning("Interrupted.")
         raise typer.Exit(code=130)
-    except Exception as e:
+    except (OutputError, SerializationError) as e:
+        logger.error("%s", e)
+        raise typer.Exit(code=3)
+    except Repo2XMLError as e:
         logger.error("Fatal error: %s", e)
         raise typer.Exit(code=1)
-    finally:
-        try:
-            closer()
-        except Exception:
-            pass
+    except Exception as e:
+        # Unexpected errors are treated as bugs.
+        logger.error("Unexpected error: %s", e)
+        raise typer.Exit(code=1)

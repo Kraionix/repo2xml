@@ -150,13 +150,20 @@ class XMLSerializer:
         Emit an XML directory tree based on file paths.
 
         Implementation:
-        - Sort all relative paths.
         - Use a stack to open/close <dir> elements without building a full tree object.
+        - Avoid redundant sorting when the caller already provides deterministic order.
         """
         nl = self.nl
         write(f"{self._indent(1)}<project_structure>{nl}")
 
-        paths = sorted(e.rel_path for e in entries)
+        paths = [e.rel_path for e in entries]
+
+        # Avoid a second sort when the pipeline already sorted entries by rel_path.
+        for i in range(len(paths) - 1):
+            if paths[i] > paths[i + 1]:
+                paths.sort()
+                break
+
         stack: list[str] = []
         base_level = 2  # children of <project_structure>
 
@@ -177,12 +184,12 @@ class XMLSerializer:
 
             close_to(common)
 
-            for i in range(common, len(dir_parts)):
-                stack.append(dir_parts[i])
+            for j in range(common, len(dir_parts)):
+                stack.append(dir_parts[j])
                 dir_path = "/".join(stack)
                 level = base_level + (len(stack) - 1)
                 write(
-                    f'{self._indent(level)}<dir name="{_esc_attr(dir_parts[i])}" '
+                    f'{self._indent(level)}<dir name="{_esc_attr(dir_parts[j])}" '
                     f'path="{_esc_attr(dir_path)}">{nl}'
                 )
 

@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from typing import BinaryIO, Generator, Optional
 
+from repo2xml.application.contracts import IngestorLike, ScannerLike
 from repo2xml.application.pipeline import ExportPipeline
 from repo2xml.application.progress import NullProgressReporter, ProgressReporter
 from repo2xml.config import Repo2XMLConfig
@@ -12,6 +13,7 @@ from repo2xml.domain.model import ExportStats, FileEntry
 from repo2xml.services.ingest.ingestor import StandardIngestor
 from repo2xml.services.scan.gitignore import GitignoreEngine
 from repo2xml.services.scan.scanner import FileSystemScanner
+from repo2xml.services.serialize.base import Serializer
 from repo2xml.services.serialize.factories import create_serializer
 
 logger = logging.getLogger("repo2xml.facade")
@@ -28,7 +30,15 @@ class Repo2XML:
       - pipeline (application orchestration)
     """
 
-    def __init__(self, root_path: Path, config: Repo2XMLConfig):
+    def __init__(
+        self,
+        root_path: Path,
+        config: Repo2XMLConfig,
+        *,
+        scanner: Optional[ScannerLike] = None,
+        ingestor: Optional[IngestorLike] = None,
+        serializer: Optional[Serializer] = None,
+    ):
         self.root_path = root_path.resolve()
         self.config = config
 
@@ -36,32 +46,42 @@ class Repo2XML:
         self.config.normalize()
         self.config.validate()
 
-        self._gitignore_engine = GitignoreEngine(
-            root_path=self.root_path,
-            user_ignore=self.config.ignore_patterns,
-            user_include=self.config.include_patterns,
-        )
+        # Defaults can be overridden for testing or custom integrations.
+        self._gitignore_engine: Optional[GitignoreEngine] = None
 
-        self._scanner = FileSystemScanner(
-            root=self.root_path,
-            gitignore_engine=self._gitignore_engine,
-            use_gitignore=self.config.use_gitignore,
-            follow_symlinks_dirs=self.config.follow_symlinks_dirs,
-            symlinks_files=self.config.symlinks_files.value,
-            hard_exclude_dirs=set(self.config.hard_exclude_dirs),
-        )
+        if scanner is None:
+            self._gitignore_engine = GitignoreEngine(
+                root_path=self.root_path,
+                user_ignore=self.config.ignore_patterns,
+                user_include=self.config.include_patterns,
+            )
 
-        self._ingestor = StandardIngestor(
-            newline_mode=self.config.newline.value,
-            use_ext_fastpath=self.config.binary_ext_fastpath,
-            binary_ext_add=self.config.binary_ext_add,
-            binary_ext_remove=self.config.binary_ext_remove,
-        )
+            scanner = FileSystemScanner(
+                root=self.root_path,
+                gitignore_engine=self._gitignore_engine,
+                use_gitignore=self.config.use_gitignore,
+                follow_symlinks_dirs=self.config.follow_symlinks_dirs,
+                symlinks_files=self.config.symlinks_files.value,
+                hard_exclude_dirs=set(self.config.hard_exclude_dirs),
+            )
 
-        self._serializer = create_serializer(
-            fmt=self.config.format,
-            formatting=self.config.formatting.value,
-        )
+        if ingestor is None:
+            ingestor = StandardIngestor(
+                newline_mode=self.config.newline.value,
+                use_ext_fastpath=self.config.binary_ext_fastpath,
+                binary_ext_add=self.config.binary_ext_add,
+                binary_ext_remove=self.config.binary_ext_remove,
+            )
+
+        if serializer is None:
+            serializer = create_serializer(
+                fmt=self.config.format,
+                formatting=self.config.formatting.value,
+            )
+
+        self._scanner = scanner
+        self._ingestor = ingestor
+        self._serializer = serializer
 
         self._pipeline = ExportPipeline(
             root_path=self.root_path,

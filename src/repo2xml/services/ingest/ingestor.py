@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
@@ -22,28 +23,72 @@ _BOMS: list[tuple[bytes, str]] = [
 # High-confidence binary extensions for quick classification.
 _BINARY_EXTS: set[str] = {
     # Images
-    ".png", ".jpg", ".jxl", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".tiff", ".tif",
+    ".png",
+    ".jpg",
+    ".jxl",
+    ".jpeg",
+    ".gif",
+    ".bmp",
+    ".ico",
+    ".webp",
+    ".tiff",
+    ".tif",
     # Audio/Video
-    ".mp3", ".wav", ".flac", ".ogg", ".m4a",
-    ".mp4", ".mkv", ".avi", ".mov", ".webm",
+    ".mp3",
+    ".wav",
+    ".flac",
+    ".ogg",
+    ".m4a",
+    ".mp4",
+    ".mkv",
+    ".avi",
+    ".mov",
+    ".webm",
     # Archives / compressed
-    ".zip", ".gz", ".bz2", ".xz", ".7z", ".rar",
+    ".zip",
+    ".gz",
+    ".bz2",
+    ".xz",
+    ".7z",
+    ".rar",
     # Documents
     ".pdf",
     # Fonts
-    ".ttf", ".otf", ".woff", ".woff2",
+    ".ttf",
+    ".otf",
+    ".woff",
+    ".woff2",
     # Executables / libs
-    ".exe", ".dll", ".so", ".dylib",
+    ".exe",
+    ".dll",
+    ".so",
+    ".dylib",
     # Bytecode / data
-    ".pyc", ".pyo", ".class",
+    ".pyc",
+    ".pyo",
+    ".class",
     # Misc
-    ".bin", ".dat",
+    ".bin",
+    ".dat",
 }
 
 # Common compound suffixes (Path.suffix only returns last part).
 _BINARY_COMPOUND_SUFFIXES: set[str] = {
-    ".tar.gz", ".tar.bz2", ".tar.xz",
+    ".tar.gz",
+    ".tar.bz2",
+    ".tar.xz",
 }
+
+# Precomputed whitelist mask for the "looks binary" heuristic.
+# Using a bytearray mask avoids per-call set construction and speeds membership checks.
+_TEXT_OK: bytearray = bytearray(256)
+for _b in (0x09, 0x0A, 0x0D, 0x08, 0x0C):  # \t \n \r \b \f
+    _TEXT_OK[_b] = 1
+for _b in range(0x20, 0x7F):  # printable ASCII
+    _TEXT_OK[_b] = 1
+for _b in range(0x80, 0x100):  # high bytes (UTF-8 continuation / legacy encodings)
+    _TEXT_OK[_b] = 1
+del _b
 
 
 def _detect_bom(data: bytes) -> Optional[str]:
@@ -72,13 +117,7 @@ def _looks_binary(sample: bytes, bom_encoding: Optional[str]) -> bool:
     if b"\x00" in sample:
         return True
 
-    # Allow ASCII printable + whitespace; allow 0x80..0xFF (likely UTF-8 or legacy encodings).
-    text_whitelist = set(b"\n\r\t\b\f") | set(range(0x20, 0x7F)) | set(range(0x80, 0x100))
-    nontext = 0
-    for b in sample:
-        if b not in text_whitelist:
-            nontext += 1
-
+    nontext = sum(1 for b in sample if not _TEXT_OK[b])
     return (nontext / len(sample)) > 0.30
 
 
@@ -143,6 +182,9 @@ def _is_likely_binary_by_extension(
     """
     Fast-path: classify obvious binary formats by filename extension.
     Matching is case-insensitive.
+
+    Note: StandardIngestor uses a cached matcher for performance. This helper
+    remains for direct unit testing and standalone use.
     """
     suffixes = [s.lower() for s in path.suffixes]
     if not suffixes:
@@ -157,6 +199,36 @@ def _is_likely_binary_by_extension(
             return True
 
     return suffixes[-1] in exts
+
+
+@dataclass(slots=True, frozen=True)
+class BinaryExtensionMatcher:
+    """Precomputed binary extension matcher (simple + compound suffixes)."""
+
+    simple_exts: frozenset[str]
+    compound_suffixes: frozenset[str]
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        add: Optional[Sequence[str]] = None,
+        remove: Optional[Sequence[str]] = None,
+    ) -> "BinaryExtensionMatcher":
+        exts, comps = _build_binary_ext_sets(add=add, remove=remove)
+        return cls(simple_exts=frozenset(exts), compound_suffixes=frozenset(comps))
+
+    def matches(self, path: Path) -> bool:
+        suffixes = [s.lower() for s in path.suffixes]
+        if not suffixes:
+            return False
+
+        if len(suffixes) >= 2:
+            comp = "".join(suffixes[-2:])
+            if comp in self.compound_suffixes:
+                return True
+
+        return suffixes[-1] in self.simple_exts
 
 
 class StandardIngestor:
@@ -182,6 +254,14 @@ class StandardIngestor:
         self.binary_ext_add = list(binary_ext_add) if binary_ext_add else []
         self.binary_ext_remove = list(binary_ext_remove) if binary_ext_remove else []
 
+        # Cache extension matcher once per ingestor instance.
+        self._ext_matcher: Optional[BinaryExtensionMatcher] = None
+        if self.use_ext_fastpath:
+            self._ext_matcher = BinaryExtensionMatcher.create(
+                add=self.binary_ext_add,
+                remove=self.binary_ext_remove,
+            )
+
     def sniff(self, path: Path) -> SniffResult:
         """
         Classify a file as likely text or binary using minimal IO.
@@ -189,9 +269,7 @@ class StandardIngestor:
         This method does not enforce size limits and does not read full content.
         """
         # Fast-path binary classification by extension (no reads).
-        if self.use_ext_fastpath and _is_likely_binary_by_extension(
-            path, add=self.binary_ext_add, remove=self.binary_ext_remove
-        ):
+        if self._ext_matcher is not None and self._ext_matcher.matches(path):
             return SniffResult(kind="binary")
 
         # Read a small sample for heuristics and BOM detection.

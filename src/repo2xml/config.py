@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, List
 
+from repo2xml.domain.exceptions import ConfigurationError
+
 
 class Mode(str, Enum):
     """High-level output mode."""
@@ -138,21 +140,21 @@ class Repo2XMLConfig:
 
     def validate(self) -> None:
         """
-        Validate configuration invariants and raise ValueError on invalid input.
+        Validate configuration invariants and raise ConfigurationError on invalid input.
 
         This is intentionally strict: better to fail early than to produce confusing output.
         """
         if self.max_text_size < 0:
-            raise ValueError("max_text_size must be >= 0")
+            raise ConfigurationError("max_text_size must be >= 0")
         if self.max_base64_size < 0:
-            raise ValueError("max_base64_size must be >= 0")
+            raise ConfigurationError("max_base64_size must be >= 0")
         if self.max_hash_size < 0:
-            raise ValueError("max_hash_size must be >= 0")
+            raise ConfigurationError("max_hash_size must be >= 0")
         if self.write_buffer_chars < 0:
-            raise ValueError("write_buffer_chars must be >= 0")
+            raise ConfigurationError("write_buffer_chars must be >= 0")
 
         if not self.format:
-            raise ValueError("format must not be empty")
+            raise ConfigurationError("format must not be empty")
 
         # Structure-only mode is compatible with any binary/text settings, but we still
         # validate numeric invariants above.
