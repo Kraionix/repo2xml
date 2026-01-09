@@ -8,7 +8,7 @@ from typing import BinaryIO, Callable, Generator, Optional
 from repo2xml.application.pipeline import ExportPipeline
 from repo2xml.application.progress import CallbackProgressReporter, NullProgressReporter, ProgressReporter
 from repo2xml.config import Repo2XMLConfig
-from repo2xml.domain.model import FileEntry
+from repo2xml.domain.model import ExportStats, FileEntry
 from repo2xml.services.ingest.ingestor import StandardIngestor
 from repo2xml.services.scan.gitignore import GitignoreEngine
 from repo2xml.services.scan.scanner import FileSystemScanner
@@ -48,7 +48,6 @@ class Repo2XML:
         )
 
         self._ingestor = StandardIngestor(
-            max_size=self.config.max_file_size,
             newline_mode=self.config.newline.value,
             use_ext_fastpath=self.config.binary_ext_fastpath,
             binary_ext_add=self.config.binary_ext_add,
@@ -75,23 +74,39 @@ class Repo2XML:
     def export(
         self,
         output_stream: BinaryIO,
+        *,
+        progress: Optional[ProgressReporter] = None,
         progress_callback: Optional[Callable[[int], None]] = None,
-    ) -> None:
+    ) -> ExportStats:
         """
         Execute the full pipeline and write output bytes to output_stream.
 
-        output_stream must be a writable binary stream.
+        Args:
+            output_stream: A writable binary stream (file, stdout, BytesIO).
+            progress: Optional ProgressReporter (supports total + finish).
+            progress_callback: Optional callback called with delta increments.
+
+        Returns:
+            ExportStats with per-run summary.
         """
         reporter: ProgressReporter
-        if progress_callback is not None:
+        if progress is not None:
+            reporter = progress
+        elif progress_callback is not None:
             reporter = CallbackProgressReporter(progress_callback)
         else:
             reporter = NullProgressReporter()
 
-        self._pipeline.execute(output_stream=output_stream, progress=reporter)
+        return self._pipeline.execute(output_stream=output_stream, progress=reporter)
 
     def export_to_bytes(self) -> bytes:
-        """Convenience helper for programmatic usage."""
+        """Convenience helper for programmatic usage (bytes only)."""
         buf = io.BytesIO()
         self.export(buf)
         return buf.getvalue()
+
+    def export_to_bytes_with_stats(self) -> tuple[bytes, ExportStats]:
+        """Convenience helper returning both bytes and stats."""
+        buf = io.BytesIO()
+        stats = self.export(buf)
+        return buf.getvalue(), stats

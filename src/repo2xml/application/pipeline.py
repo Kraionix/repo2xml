@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import io
 import logging
-import os
 from datetime import datetime, timezone
 from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import BinaryIO, List, Optional
 
+from repo2xml.application.contracts import IngestorLike, ScannerLike
 from repo2xml.application.progress import ProgressReporter
-from repo2xml.config import BinaryMode, Mode, Repo2XMLConfig, RootPathMode, SymlinkFilesMode
+from repo2xml.config import BinaryMode, Mode, Repo2XMLConfig, SymlinkFilesMode
 from repo2xml.domain.model import (
     BinaryBase64Payload,
     BinaryHashPayload,
@@ -23,9 +23,8 @@ from repo2xml.domain.model import (
     SkippedPayload,
     TextPayload,
 )
-from repo2xml.services.ingest.ingestor import IngestResult, StandardIngestor
-from repo2xml.services.scan.scanner import FileSystemScanner
 from repo2xml.services.serialize.base import Serializer
+from repo2xml.utils.paths import format_root_path
 
 logger = logging.getLogger("repo2xml.pipeline")
 
@@ -38,39 +37,6 @@ def _tool_version() -> str:
         return "0.0.0"
 
 
-def _posix_relpath(path: Path, base: Path) -> Optional[str]:
-    """Return POSIX relative path if possible."""
-    try:
-        rel = os.path.relpath(path.resolve(), base.resolve())
-        rel = rel.replace("\\", "/")
-        return rel if rel else "."
-    except Exception:
-        return None
-
-
-def _format_root_path(root: Path, mode: RootPathMode) -> str:
-    """
-    Format meta.root_path according to config.
-
-    Always uses POSIX separators for reproducibility.
-    """
-    if mode == RootPathMode.absolute:
-        return root.as_posix()
-
-    if mode == RootPathMode.relative:
-        cwd = Path.cwd().resolve()
-        rel = _posix_relpath(root, cwd)
-        if rel is not None:
-            return rel
-        return (root.name or ".").replace("\\", "/")
-
-    if mode == RootPathMode.redact:
-        return "<redacted>"
-
-    # Defensive fallback
-    return root.as_posix()
-
-
 class ExportPipeline:
     """
     Main orchestration pipeline.
@@ -79,7 +45,7 @@ class ExportPipeline:
       1) Scan: collect FileEntry list (needed for structure + deterministic order)
       2) Serialize:
          - header/meta
-         - project_structure
+         - project_structure (if supported)
          - files (optional)
          - footer
     """
@@ -89,8 +55,8 @@ class ExportPipeline:
         *,
         root_path: Path,
         config: Repo2XMLConfig,
-        scanner: FileSystemScanner,
-        ingestor: StandardIngestor,
+        scanner: ScannerLike,
+        ingestor: IngestorLike,
         serializer: Serializer,
     ):
         self.root_path = root_path.resolve()
@@ -118,8 +84,9 @@ class ExportPipeline:
             entries.sort(key=lambda e: e.rel_path)
 
             scan_warn: Optional[str] = None
-            if getattr(self.scanner, "stats", None) is not None and self.scanner.stats.has_issues():
-                scan_warn = self.scanner.stats.summary()
+            stats = getattr(self.scanner, "stats", None)
+            if stats is not None and getattr(stats, "has_issues", None) is not None and stats.has_issues():
+                scan_warn = stats.summary()
                 logger.warning("Scan encountered filesystem errors (some entries skipped): %s", scan_warn)
 
             total = len(entries)
@@ -132,7 +99,7 @@ class ExportPipeline:
                 generated_at = datetime.now(timezone.utc).isoformat()
 
             meta = ExportMeta(
-                root_path=_format_root_path(self.root_path, self.config.root_path_mode),
+                root_path=format_root_path(self.root_path, self.config.root_path_mode),
                 generated_at_utc=generated_at,
                 tool_version=_tool_version(),
                 schema_version="1.0",
@@ -140,7 +107,13 @@ class ExportPipeline:
 
             # Phase 2: serialize
             self.serializer.write_header(meta, write)
-            self.serializer.write_structure(entries, write)
+
+            if self.serializer.supports_structure:
+                self.serializer.write_structure(entries, write)
+            else:
+                # Structure-only output is meaningless if serializer doesn't support structure.
+                if self.config.mode == Mode.structure:
+                    raise ValueError("Selected serializer does not support structure-only mode")
 
             if self.config.mode == Mode.structure:
                 self.serializer.write_footer(write)
@@ -153,7 +126,8 @@ class ExportPipeline:
                     scan_warning_summary=scan_warn,
                 )
 
-            self.serializer.write_files_open(self.config.mode.value, write)
+            if self.serializer.supports_files_section:
+                self.serializer.write_files_open(self.config.mode.value, write)
 
             emitted = 0
             skipped = 0
@@ -172,7 +146,9 @@ class ExportPipeline:
 
                 progress.advance(1)
 
-            self.serializer.write_files_close(write)
+            if self.serializer.supports_files_section:
+                self.serializer.write_files_close(write)
+
             self.serializer.write_footer(write)
             text_out.flush()
 
@@ -203,6 +179,7 @@ class ExportPipeline:
         - mode (structure/metadata/full)
         - symlink handling
         - binary handling
+        - size limits (text/base64/hash)
         - text processors
         """
         # Symlink-as-link overrides any content reads.
@@ -213,8 +190,43 @@ class ExportPipeline:
         if self.config.mode == Mode.metadata:
             return MetadataPayload()
 
-        # Full mode: ingest content.
-        res = self.ingestor.ingest(entry.abs_path)
+        # Full mode: sniff first to avoid unnecessary full reads and to support split limits.
+        sniff = self.ingestor.sniff(entry.abs_path)
+
+        if sniff.kind == "error":
+            return ErrorPayload(message=sniff.reason or "Error sniffing file")
+
+        if sniff.kind == "binary":
+            # Binary handling (skip/base64/hash) with split limits.
+            if self.config.binary == BinaryMode.skip:
+                return SkippedPayload(reason="Skipped: Binary file detected")
+
+            if self.config.binary == BinaryMode.hash:
+                if self.config.max_hash_size > 0 and entry.size > self.config.max_hash_size:
+                    return SkippedPayload(
+                        reason=f"Skipped: File size {entry.size} exceeds hash limit {self.config.max_hash_size}"
+                    )
+                try:
+                    h = self.ingestor.sha256_file(entry.abs_path)
+                except OSError as e:
+                    return ErrorPayload(message=f"Error hashing file: {e}")
+                return BinaryHashPayload(sha256_hex=h)
+
+            if self.config.binary == BinaryMode.base64:
+                if entry.size > self.config.max_base64_size:
+                    return SkippedPayload(
+                        reason=f"Skipped: File size {entry.size} exceeds base64 limit {self.config.max_base64_size}"
+                    )
+                try:
+                    chunks = self.ingestor.iter_base64_chunks(entry.abs_path)
+                except OSError as e:
+                    return ErrorPayload(message=f"Error base64-encoding file: {e}")
+                return BinaryBase64Payload(chunks=chunks)
+
+            return SkippedPayload(reason="Skipped: Unknown binary mode")
+
+        # sniff.kind == "text"
+        res = self.ingestor.read_text(entry.abs_path, max_size=self.config.max_text_size)
 
         if res.kind == "text":
             text = res.text or ""
@@ -224,27 +236,7 @@ class ExportPipeline:
                 except Exception as e:
                     # Processor failures should not crash export; emit an error marker.
                     return ErrorPayload(message=f"Text processor error: {e}")
-            return TextPayload(text=text, encoding=res.encoding)
-
-        if res.kind == "binary":
-            if self.config.binary == BinaryMode.skip:
-                return SkippedPayload(reason="Skipped: Binary file detected")
-
-            if self.config.binary == BinaryMode.hash:
-                try:
-                    h = self.ingestor.sha256_file(entry.abs_path)
-                except OSError as e:
-                    return ErrorPayload(message=f"Error hashing file: {e}")
-                return BinaryHashPayload(sha256_hex=h)
-
-            if self.config.binary == BinaryMode.base64:
-                try:
-                    chunks = self.ingestor.iter_base64_chunks(entry.abs_path)
-                except OSError as e:
-                    return ErrorPayload(message=f"Error base64-encoding file: {e}")
-                return BinaryBase64Payload(chunks=chunks)
-
-            return SkippedPayload(reason="Skipped: Unknown binary mode")
+            return TextPayload(text=text, encoding=res.encoding or sniff.encoding)
 
         if res.kind == "skip":
             return SkippedPayload(reason=res.reason or "Skipped")
@@ -252,4 +244,4 @@ class ExportPipeline:
         if res.kind == "error":
             return ErrorPayload(message=res.reason or "Error")
 
-        return ErrorPayload(message="Unknown ingest result")
+        return ErrorPayload(message="Unknown text read result")

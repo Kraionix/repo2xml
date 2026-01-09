@@ -19,7 +19,8 @@ from repo2xml.config import (
 )
 from repo2xml.cli.ui import LogLevel, setup_logging
 from repo2xml.facade import Repo2XML
-from repo2xml.services.output.targets import CompressMode, open_output_stream, try_relpath_posix
+from repo2xml.services.output.targets import CompressMode, open_output_stream
+from repo2xml.utils.paths import try_relpath_posix
 
 app = typer.Typer(add_completion=False)
 
@@ -143,7 +144,7 @@ def main(
     max_size: int = typer.Option(
         100_000,
         "--max-size",
-        help="Max file size in bytes to include content for (larger files are skipped).",
+        help="Max size in bytes for embedding text/base64 content (larger files are skipped).",
         min=0,
     ),
     binary: BinaryMode = typer.Option(
@@ -196,7 +197,10 @@ def main(
         hard_exclude_dirs=hard_exclude,
         follow_symlinks_dirs=follow_symlinks_dirs,
         symlinks_files=symlinks_files,
-        max_file_size=max_size,
+        max_text_size=max_size,
+        max_base64_size=max_size,
+        # Hashing is allowed beyond --max-size by default (0 = unlimited).
+        max_hash_size=0,
     )
 
     engine = Repo2XML(root, config)
@@ -219,16 +223,18 @@ def main(
 
         try:
             reporter = TqdmProgressReporter() if progress else NullProgressReporter()
-            engine.export(mem_buffer, progress_callback=reporter.advance if progress else None)
+            stats = engine.export(mem_buffer, progress=reporter)
 
             xml_content = mem_buffer.getvalue().decode("utf-8")
             pyperclip.copy(xml_content)
             logger.info("Success! Context copied to clipboard (%d chars).", len(xml_content))
-
-            try:
-                reporter.finish()
-            except Exception:
-                pass
+            logger.info(
+                "Stats: total=%d, emitted=%d, skipped=%d, errors=%d",
+                stats.files_total,
+                stats.files_emitted,
+                stats.files_skipped,
+                stats.files_errors,
+            )
 
         except pyperclip.PyperclipException as e:
             logger.error("Clipboard error: %s", e)
@@ -253,13 +259,22 @@ def main(
     try:
         if progress:
             reporter = TqdmProgressReporter()
-            engine.export(out_stream, progress_callback=reporter.advance)
-            reporter.finish()
+            stats = engine.export(out_stream, progress=reporter)
         else:
-            engine.export(out_stream)
+            stats = engine.export(out_stream)
 
         if not stdout:
             logger.info("Done. Output written to: %s", out_abs)
+
+        logger.info(
+            "Stats: total=%d, emitted=%d, skipped=%d, errors=%d",
+            stats.files_total,
+            stats.files_emitted,
+            stats.files_skipped,
+            stats.files_errors,
+        )
+        if stats.scan_warning_summary:
+            logger.warning("Scan warnings: %s", stats.scan_warning_summary)
 
     except KeyboardInterrupt:
         logger.warning("Interrupted.")

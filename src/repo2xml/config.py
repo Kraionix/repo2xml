@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, List, Optional
+from typing import Callable, List
 
 
 class Mode(str, Enum):
@@ -52,9 +52,9 @@ class RootPathMode(str, Enum):
     redact = "redact"
 
 
-# Content processors are intentionally typed as Callables to keep config lightweight.
+# Text processors are intentionally typed as Callables to keep config lightweight.
 # Future: introduce a dedicated protocol if/when processors become a public extension API.
-ContentProcessor = Callable[[str], str]
+TextProcessor = Callable[[str], str]
 
 
 @dataclass(slots=True)
@@ -94,9 +94,17 @@ class Repo2XMLConfig:
     follow_symlinks_dirs: bool = False
     symlinks_files: SymlinkFilesMode = SymlinkFilesMode.follow
 
-    # Ingestion limits
-    max_file_size: int = 100_000
+    # Ingestion limits (split by representation)
+    #
+    # - max_text_size: maximum size for embedding decoded text content
+    # - max_base64_size: maximum size for embedding base64 (binary bytes)
+    # - max_hash_size: maximum size for hashing binaries; 0 means "no limit"
+    #
+    # This split makes it possible to allow hashing large binaries without embedding them.
+    max_text_size: int = 100_000
+    max_base64_size: int = 100_000
+    max_hash_size: int = 0
 
-    # Optional content processors (text-only). Not exposed via CLI yet.
+    # Optional text processors (text-only). Not exposed via CLI yet.
     # Processors are applied in order to ingested text content.
-    text_processors: List[Callable[[str], str]] = field(default_factory=list)
+    text_processors: List[TextProcessor] = field(default_factory=list)

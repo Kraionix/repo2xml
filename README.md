@@ -1,8 +1,10 @@
 # repo2xml
 
-Convert a source code repository into a single, structured XML context for LLM ingestion.
+Convert a source code repository into a single, structured context document for LLM ingestion.
 
-`repo2xml` walks a repository, applies `.gitignore`-style filtering (recursively, via a gitignore stack), emits a directory tree, and (optionally) embeds file contents with metadata in a deterministic XML format.
+`repo2xml` walks a repository, applies `.gitignore`-style filtering (recursively, via a gitignore stack), emits a directory tree, and (optionally) embeds file contents with metadata in a deterministic format.
+
+The internal architecture is pipeline-based (Scan → Ingest → Serialize → Write). This makes it easier to add future output formats (JSON), API layers (gRPC/HTTP), and agent integrations, while keeping the current CLI behavior stable.
 
 ## Features
 
@@ -10,7 +12,7 @@ Convert a source code repository into a single, structured XML context for LLM i
 - **File metadata**: relative path, size, extension(s), UTC mtime, symlink info.
 - **Content modes**:
   - `full`: metadata + content (default)
-  - `metadata`: metadata only (no content reads)
+  - `metadata`: metadata only (no content reads; not treated as "skipped")
   - `structure`: structure only
 - **Robust Filtering**:
   - Respects `.gitignore` (enabled by default).
@@ -19,8 +21,8 @@ Convert a source code repository into a single, structured XML context for LLM i
   - **Hard excludes** (e.g. `.git`) preventing accidental traversal.
 - **Smart Symlink Handling**:
   - Can treat symlink files as links (`as-link`) to save tokens, avoiding content duplication.
-  - Safe directory traversal with cycle protection.
-- **Fault Tolerance**: Read errors (permissions, encoding) do not crash the tool; they are reported as `<error>` tags within the XML.
+  - Safe directory traversal with cycle protection (when following symlink dirs).
+- **Fault Tolerance**: Read errors (permissions, encoding) do not crash the tool; they are reported as `<error>` tags within the output.
 - **Binary handling**: skip, embed as base64, or store SHA-256 hash.
   - `base64` and `hash` are computed in a streaming fashion (no full binary read into memory).
 - **Binary extension fast-path** (configurable):
@@ -82,13 +84,24 @@ repo2xml --help
 ### Meta and determinism
 
 - `--no-timestamp`
-  Omit `<generated_at_utc>` from the XML meta block, for deterministic output.
+  Omit `<generated_at_utc>` from the output meta block, for deterministic output.
 
 - `--root-path-mode [absolute|relative|redact]`
   How to emit `<root_path>`:
   - `absolute` (default): full resolved path (POSIX separators)
   - `relative`: relative path from current working directory when possible (POSIX separators)
   - `redact`: emit `<redacted>`
+
+### Size limits
+
+- `--max-size BYTES`
+  Maximum size for embedding:
+  - text content
+  - base64 content (when `--binary base64`)
+
+  Larger files are emitted as skipped entries (with a reason).
+
+  Note: binary hashing (`--binary hash`) is allowed beyond `--max-size` by default.
 
 ### Binary detection fast-path
 
@@ -100,19 +113,19 @@ repo2xml --help
   Examples: `--binary-ext-add PSD`, `--binary-ext-add .psd`, `--binary-ext-add .tar.zst`
 
 - `--binary-ext-remove TEXT`
-  Remove extensions from the default fast-path set (repeatable). Case-insensitive.
+  Remove extensions from the default binary fast-path set (repeatable). Case-insensitive.
   Example: `--binary-ext-remove .pdf`
 
 ## Output Format
 
 The output is a single XML document.
 
-Paths in XML are always repository-relative and use POSIX separators (`/`), even on Windows.
+Paths in output are always repository-relative and use POSIX separators (`/`), even on Windows.
 
 ## Fault Tolerance
 
 `repo2xml` employs a "fail-soft" strategy:
-1. **Access Errors:** If a file cannot be read (permissions, locks), it is reported as an `<error>` in the XML, but processing continues.
+1. **Access Errors:** If a file cannot be read (permissions, locks), it is reported as an `<error>` in the output, but processing continues.
 2. **Directory Access Errors:** If a directory cannot be listed (permissions, transient errors), it is skipped and a warning is logged.
 3. **Scanner Entry Errors:** If a directory entry fails `is_file/stat/readlink`, it is skipped. A summary warning is logged after scanning (without spamming per file).
 
@@ -122,4 +135,33 @@ Quick check using Python's standard library:
 
 ```bash
 python -c "import xml.etree.ElementTree as ET; ET.parse('context.xml'); print('XML OK')"
+```
+
+## Library Usage
+
+Minimal example:
+
+```python
+from pathlib import Path
+from repo2xml import Repo2XML, Repo2XMLConfig
+
+engine = Repo2XML(Path("."), Repo2XMLConfig())
+with open("context.xml", "wb") as f:
+    stats = engine.export(f)
+
+print(stats)
+```
+
+Progress example (tqdm reporter):
+
+```python
+from pathlib import Path
+from repo2xml import Repo2XML, Repo2XMLConfig
+from repo2xml.application.progress import TqdmProgressReporter
+
+engine = Repo2XML(Path("."), Repo2XMLConfig())
+with open("context.xml", "wb") as f:
+    stats = engine.export(f, progress=TqdmProgressReporter())
+
+print(stats)
 ```

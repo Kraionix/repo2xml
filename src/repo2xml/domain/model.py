@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional, Union
+from typing import Iterable, Literal, Optional, Union
 
 
 @dataclass(slots=True)
@@ -46,18 +46,51 @@ class ExportStats:
     scan_warning_summary: Optional[str] = None
 
 
+@dataclass(slots=True)
+class SniffResult:
+    """
+    Lightweight classification result for a file.
+
+    This is intentionally small and cheap: it should not read full file content.
+    """
+    kind: Literal["text", "binary", "error"]
+    encoding: Optional[str] = None
+    reason: Optional[str] = None
+
+
+@dataclass(slots=True)
+class TextReadResult:
+    """Result of a bounded text read."""
+    kind: Literal["text", "skip", "error"]
+    text: Optional[str] = None
+    encoding: Optional[str] = None
+    reason: Optional[str] = None
+
+
 # Payloads represent how a file should be emitted by a serializer.
 # This keeps serializers independent from scanning/ingestion policy switches.
 
 
 @dataclass(slots=True)
 class MetadataPayload:
-    """Emit metadata only (no content)."""
+    """
+    Emit metadata only (no content).
+
+    Semantics:
+    - This is NOT an error and NOT "skipped".
+    - Serializers should output a normal file entry without <content>.
+    """
 
 
 @dataclass(slots=True)
 class LinkPayload:
-    """Emit link metadata only (symlink-as-link mode)."""
+    """
+    Emit link metadata only (symlink-as-link mode).
+
+    Semantics:
+    - This is NOT an error and NOT "skipped".
+    - Serializers should include link target info when available.
+    """
     link_target: Optional[str] = None
 
 
@@ -87,13 +120,25 @@ class BinaryBase64Payload:
 
 @dataclass(slots=True)
 class SkippedPayload:
-    """Emit a skipped marker with a reason."""
+    """
+    Emit a skipped marker with a human-readable reason.
+
+    Semantics:
+    - This is an intentional omission (size limits, binary skip mode, etc.).
+    - Serializers should mark the entry as skipped.
+    """
     reason: str
 
 
 @dataclass(slots=True)
 class ErrorPayload:
-    """Emit an error marker with a message."""
+    """
+    Emit an error marker with a human-readable message.
+
+    Semantics:
+    - This is a failed attempt to process a file (read/decode/hash errors, etc.).
+    - Serializers should mark the entry as skipped/error.
+    """
     message: str
 
 

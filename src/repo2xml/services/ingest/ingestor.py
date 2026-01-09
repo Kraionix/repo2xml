@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import base64
 import hashlib
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Literal, Optional, Sequence
+from typing import Iterable, Optional, Sequence
+
+from repo2xml.domain.model import SniffResult, TextReadResult
 
 # Number of bytes used for binary/encoding heuristics.
 SNIFF_BYTES = 4096
@@ -158,80 +159,82 @@ def _is_likely_binary_by_extension(
     return suffixes[-1] in exts
 
 
-@dataclass(slots=True)
-class IngestResult:
-    """
-    Output of StandardIngestor.ingest().
-
-    - kind="text": decoded text available in `text`
-    - kind="binary": binary detected
-    - kind="skip": file intentionally skipped (size limit, etc.)
-    - kind="error": failed to read/decode
-    """
-    kind: Literal["text", "binary", "skip", "error"]
-    text: Optional[str] = None
-    encoding: Optional[str] = None
-    reason: Optional[str] = None
-
-
 class StandardIngestor:
     """
-    Read file content in a robust way.
+    Ingestor responsible for safe reading and lightweight classification.
 
     Design notes:
-    - Uses size limit to avoid large reads.
-    - Uses extension-based binary fast path (high confidence, configurable).
-    - Uses BOM detection to decode UTF-16/32 correctly.
-    - Supports newline normalization to reduce prompt noise.
+    - sniff(): low-cost classification (binary vs text) using extension fast-path and a small sample.
+    - read_text(): bounded read of the full text file with size limits and newline normalization.
     - Hash/base64 utilities are streaming and can be used by the pipeline when needed.
     """
 
     def __init__(
         self,
         *,
-        max_size: int,
         newline_mode: str,  # "preserve" | "lf"
         use_ext_fastpath: bool = True,
         binary_ext_add: Optional[Sequence[str]] = None,
         binary_ext_remove: Optional[Sequence[str]] = None,
     ):
-        self.max_size = max_size
         self.newline_mode = newline_mode
         self.use_ext_fastpath = use_ext_fastpath
         self.binary_ext_add = list(binary_ext_add) if binary_ext_add else []
         self.binary_ext_remove = list(binary_ext_remove) if binary_ext_remove else []
 
-    def ingest(self, path: Path) -> IngestResult:
-        # Stat first to enforce a hard size limit cheaply.
-        try:
-            st = path.stat()
-        except OSError as e:
-            return IngestResult(kind="error", reason=f"Error stat file: {e}")
+    def sniff(self, path: Path) -> SniffResult:
+        """
+        Classify a file as likely text or binary using minimal IO.
 
-        if st.st_size > self.max_size:
-            return IngestResult(kind="skip", reason=f"Skipped: File size {st.st_size} exceeds limit {self.max_size}")
-
+        This method does not enforce size limits and does not read full content.
+        """
         # Fast-path binary classification by extension (no reads).
         if self.use_ext_fastpath and _is_likely_binary_by_extension(
             path, add=self.binary_ext_add, remove=self.binary_ext_remove
         ):
-            return IngestResult(kind="binary")
+            return SniffResult(kind="binary")
 
         # Read a small sample for heuristics and BOM detection.
         try:
             with open(path, "rb") as f:
                 sample = f.read(SNIFF_BYTES)
+        except OSError as e:
+            return SniffResult(kind="error", reason=f"Error reading file sample: {e}")
 
+        bom_enc = _detect_bom(sample)
+        if _looks_binary(sample, bom_enc):
+            return SniffResult(kind="binary", encoding=bom_enc)
+
+        return SniffResult(kind="text", encoding=bom_enc or "utf-8")
+
+    def read_text(self, path: Path, *, max_size: int) -> TextReadResult:
+        """
+        Read and decode a file as text, enforcing a hard size limit.
+
+        Even if the caller already used sniff(), we still guard against accidentally
+        embedding binary-like content by re-checking the initial sample.
+        """
+        try:
+            st = path.stat()
+        except OSError as e:
+            return TextReadResult(kind="error", reason=f"Error stat file: {e}")
+
+        if st.st_size > max_size:
+            return TextReadResult(kind="skip", reason=f"Skipped: File size {st.st_size} exceeds limit {max_size}")
+
+        try:
+            with open(path, "rb") as f:
+                sample = f.read(SNIFF_BYTES)
                 bom_enc = _detect_bom(sample)
-                if _looks_binary(sample, bom_enc):
-                    return IngestResult(kind="binary")
 
-                # Text path: we already have a size cap, so reading the rest is acceptable.
+                # Safety check: avoid embedding binary even if caller classified it incorrectly.
+                if _looks_binary(sample, bom_enc):
+                    return TextReadResult(kind="error", reason="Binary file detected during text read")
+
                 rest = f.read()
         except OSError as e:
-            return IngestResult(kind="error", reason=f"Error reading file: {e}")
+            return TextReadResult(kind="error", reason=f"Error reading file: {e}")
 
-        # Avoid `sample + rest` (extra large allocation/copy). Use a single growable buffer.
         buf = bytearray(sample)
         buf.extend(rest)
 
@@ -239,13 +242,13 @@ class StandardIngestor:
         try:
             text = buf.decode(enc, errors="replace")
         except Exception as e:
-            return IngestResult(kind="error", reason=f"Error decoding with {enc}: {e}")
+            return TextReadResult(kind="error", reason=f"Error decoding with {enc}: {e}")
 
         if self.newline_mode == "lf":
             # Normalize CRLF/CR to LF for more stable diffs and fewer prompt tokens.
             text = text.replace("\r\n", "\n").replace("\r", "\n")
 
-        return IngestResult(kind="text", text=text, encoding=enc)
+        return TextReadResult(kind="text", text=text, encoding=enc)
 
     @staticmethod
     def sha256_file(path: Path, *, chunk_size: int = 1024 * 64) -> str:

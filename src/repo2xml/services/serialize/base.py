@@ -15,7 +15,19 @@ class Serializer(Protocol):
     Serializers should be streaming-friendly:
     - write fragments to the provided write() callable
     - avoid buffering the whole document in memory
+
+    The contract is intentionally minimal but slightly generalized:
+    - Some serializers may not emit a dedicated structure section.
+    - Some serializers may not have an explicit <files> container concept.
     """
+
+    @property
+    def supports_structure(self) -> bool:
+        ...
+
+    @property
+    def supports_files_section(self) -> bool:
+        ...
 
     def write_header(self, meta: ExportMeta, write: WriteFn) -> None:
         ...

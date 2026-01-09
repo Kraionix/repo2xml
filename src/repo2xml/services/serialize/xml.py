@@ -4,7 +4,7 @@ import base64
 import html
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Sequence
+from typing import Optional, Sequence
 
 from repo2xml.domain.model import (
     BinaryBase64Payload,
@@ -110,6 +110,14 @@ class XMLSerializer:
         self.formatting = formatting
         self.nl = "" if formatting == "minify" else "\n"
 
+    @property
+    def supports_structure(self) -> bool:
+        return True
+
+    @property
+    def supports_files_section(self) -> bool:
+        return True
+
     def _indent(self, level: int) -> str:
         """Indentation policy: tabs only in 'pretty' formatting."""
         if self.formatting == "pretty":
@@ -123,13 +131,19 @@ class XMLSerializer:
         i2 = self._indent(2)
 
         write(f'{i0}<?xml version="1.0" encoding="utf-8"?>{nl}')
-        write(f'{i0}<repository_context version="{_esc_attr(meta.schema_version)}" '
-              f'tool_version="{_esc_attr(meta.tool_version)}">{nl}')
+        write(
+            f'{i0}<repository_context version="{_esc_attr(meta.schema_version)}" '
+            f'tool_version="{_esc_attr(meta.tool_version)}">{nl}'
+        )
         write(f"{i1}<meta>{nl}")
         write(f"{i2}<root_path>{html.escape(_xml_sanitize_text(meta.root_path))}</root_path>{nl}")
 
         if meta.generated_at_utc is not None:
-            write(f"{i2}<generated_at_utc>{html.escape(_xml_sanitize_text(meta.generated_at_utc))}</generated_at_utc>{nl}")
+            write(
+                f"{i2}<generated_at_utc>"
+                f"{html.escape(_xml_sanitize_text(meta.generated_at_utc))}"
+                f"</generated_at_utc>{nl}"
+            )
 
         write(f"{i1}</meta>{nl}")
 
@@ -195,7 +209,13 @@ class XMLSerializer:
     def write_files_close(self, write: WriteFn) -> None:
         write(f"{self._indent(1)}</files>{self.nl}")
 
-    def _file_attr_str(self, entry: FileEntry) -> str:
+    def _file_attr_str(self, entry: FileEntry, *, link_target_override: Optional[str] = None) -> str:
+        """
+        Build a compact attribute string for a <file> element.
+
+        link_target_override is used for LinkPayload in case the scan did not
+        capture a readlink target (platform/permission dependent).
+        """
         attrs = {
             "path": entry.rel_path,
             "size": str(entry.size),
@@ -203,10 +223,13 @@ class XMLSerializer:
             "mtime_utc": _iso_utc_from_mtime_ns(entry.mtime_ns),
         }
         parts = [f'{k}="{_esc_attr(v)}"' for k, v in attrs.items()]
+
         if entry.is_symlink:
             parts.append('symlink="true"')
-            if entry.symlink_target:
-                parts.append(f'link_target="{_esc_attr(entry.symlink_target)}"')
+            target = entry.symlink_target or link_target_override
+            if target:
+                parts.append(f'link_target="{_esc_attr(target)}"')
+
         return " ".join(parts)
 
     def write_file(self, entry: FileEntry, payload: FilePayload, write: WriteFn) -> None:
@@ -214,19 +237,19 @@ class XMLSerializer:
         i2 = self._indent(2)
         i3 = self._indent(3)
 
-        attrs = self._file_attr_str(entry)
-
         if isinstance(payload, MetadataPayload):
+            # Metadata mode semantics: normal file entry, no <content>, no skipped markers.
+            attrs = self._file_attr_str(entry)
             write(f'{i2}<file {attrs} />{nl}')
             return
 
         if isinstance(payload, LinkPayload):
-            # Keep symlink metadata in attrs; add link_only marker for explicitness.
-            if payload.link_target and not entry.symlink_target:
-                # Defensive: prefer payload target if entry doesn't have it
-                pass
+            # Link-only entry for symlinks when configured as "as-link".
+            attrs = self._file_attr_str(entry, link_target_override=payload.link_target)
             write(f'{i2}<file {attrs} link_only="true" />{nl}')
             return
+
+        attrs = self._file_attr_str(entry)
 
         if isinstance(payload, TextPayload):
             write(f'{i2}<file {attrs}>{nl}')
@@ -236,7 +259,7 @@ class XMLSerializer:
 
         if isinstance(payload, BinaryHashPayload):
             write(f'{i2}<file {attrs} binary="true">{nl}')
-            write(f'{i3}<content encoding="sha256">{_esc_attr(payload.sha256_hex)}</content>{nl}')
+            write(f'{i3}<content encoding="sha256">{html.escape(payload.sha256_hex)}</content>{nl}')
             write(f"{i2}</file>{nl}")
             return
 

@@ -4,7 +4,9 @@ import gzip
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import BinaryIO, Callable, Optional, Tuple
+from typing import BinaryIO, Callable, Tuple
+
+from repo2xml.utils.paths import try_relpath_posix
 
 
 class CompressMode(str, Enum):
@@ -12,14 +14,6 @@ class CompressMode(str, Enum):
     none = "none"
     gzip = "gzip"
     zstd = "zstd"
-
-
-def try_relpath_posix(child: Path, root: Path) -> Optional[str]:
-    """Return POSIX relative path if child is inside root, else None."""
-    try:
-        return child.resolve().relative_to(root.resolve()).as_posix()
-    except Exception:
-        return None
 
 
 def open_output_stream(
@@ -67,3 +61,6 @@ def open_output_stream(
         return zw, lambda: (zw.close(), raw.close())
 
     return raw, raw.close
+
+
+__all__ = ["CompressMode", "open_output_stream", "try_relpath_posix"]

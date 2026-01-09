@@ -1,0 +1,1 @@
+"""Small internal utilities shared across layers."""
