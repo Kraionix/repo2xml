@@ -7,7 +7,16 @@ Public API:
 """
 
 from .facade import Repo2XML
-from .config import Repo2XMLConfig, Mode, BinaryMode, Formatting, RootPathMode, NewlineMode, SymlinkFilesMode
+from .config import (
+    BinaryMode,
+    DecodeErrors,
+    Formatting,
+    Mode,
+    NewlineMode,
+    Repo2XMLConfig,
+    RootPathMode,
+    SymlinkFilesMode,
+)
 
 __all__ = [
     "Repo2XML",
@@ -18,4 +27,5 @@ __all__ = [
     "RootPathMode",
     "NewlineMode",
     "SymlinkFilesMode",
+    "DecodeErrors",
 ]

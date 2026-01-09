@@ -3,7 +3,6 @@ from __future__ import annotations
 import io
 import logging
 from datetime import datetime, timezone
-from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import BinaryIO, List, Optional
 
@@ -22,16 +21,9 @@ from repo2xml.domain.model import (
 )
 from repo2xml.services.serialize.base import Serializer
 from repo2xml.utils.paths import format_root_path
+from repo2xml.utils.version import tool_version
 
 logger = logging.getLogger("repo2xml.pipeline")
-
-
-def _tool_version() -> str:
-    """Best-effort read package version from metadata."""
-    try:
-        return importlib_metadata.version("repo2xml")
-    except Exception:
-        return "0.0.0"
 
 
 class ExportPipeline:
@@ -114,7 +106,7 @@ class ExportPipeline:
             meta = ExportMeta(
                 root_path=format_root_path(self.root_path, self.config.root_path_mode),
                 generated_at_utc=generated_at,
-                tool_version=_tool_version(),
+                tool_version=tool_version("repo2xml"),
                 schema_version=SCHEMA_VERSION,
             )
 

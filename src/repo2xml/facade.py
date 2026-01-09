@@ -68,6 +68,7 @@ class Repo2XML:
         if ingestor is None:
             ingestor = StandardIngestor(
                 newline_mode=self.config.newline.value,
+                decode_errors=self.config.decode_errors.value,
                 use_ext_fastpath=self.config.binary_ext_fastpath,
                 binary_ext_add=self.config.binary_ext_add,
                 binary_ext_remove=self.config.binary_ext_remove,
@@ -77,6 +78,9 @@ class Repo2XML:
             serializer = create_serializer(
                 fmt=self.config.format,
                 formatting=self.config.formatting.value,
+                include_mtime=self.config.include_mtime,
+                include_size=self.config.include_size,
+                text_decode_errors=self.config.decode_errors.value,
             )
 
         self._scanner = scanner

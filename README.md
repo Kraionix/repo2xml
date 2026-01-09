@@ -9,7 +9,7 @@ The internal architecture is pipeline-based (Scan → Ingest → Serialize → W
 ## Features
 
 - **Project structure** as an XML tree (`<project_structure>` with `<dir>` / `<file>`).
-- **File metadata**: relative path, size, extension(s), UTC mtime, symlink info.
+- **File metadata**: relative path, extension(s), UTC mtime (optional), size (optional), symlink info.
 - **Content modes**:
   - `full`: metadata + content (default)
   - `metadata`: metadata only (no content reads; not treated as "skipped")
@@ -20,7 +20,8 @@ The internal architecture is pipeline-based (Scan → Ingest → Serialize → W
   - **Force Include** (`--include`) to override gitignore rules (un-ignore).
   - **Hard excludes** (e.g. `.git`) preventing accidental traversal.
 - **Smart Symlink Handling**:
-  - Can treat symlink files as links (`as-link`) to save tokens, avoiding content duplication.
+  - Can treat symlink files as links (`as-link`) to save tokens and avoid touching link targets.
+  - Broken symlink files are still included in output in `as-link` mode.
   - Safe directory traversal with cycle protection (when following symlink dirs).
 - **Fault Tolerance**: Read errors (permissions, encoding) do not crash the tool; they are reported as `<error>` tags within the output.
 - **Binary handling**: skip, embed as base64, or store SHA-256 hash.
@@ -32,6 +33,8 @@ The internal architecture is pipeline-based (Scan → Ingest → Serialize → W
 - **Output**: File or stdout; optional gzip/zstd compression; clipboard support.
 - **Deterministic output options**:
   - `--no-timestamp` omits `generated_at_utc` for stable diffs.
+  - `--no-mtime` omits `mtime_utc` attributes for stable diffs.
+  - `--no-size` omits `size` attributes (determinism / privacy).
   - `--root-path-mode relative|redact` avoids leaking absolute paths.
   - `<root_path>` always uses POSIX separators (`/`) for reproducibility.
 - **Built-in safety**:
@@ -55,7 +58,7 @@ pip install -e ".[zstd]"
 
 ## Quick Start
 
-> **Note:** This CLI is implemented as a Typer app. To ensure arguments are parsed correctly, place **options before the PATH**.
+> Note: This CLI is implemented as a Typer app. To ensure arguments are parsed correctly, place options before the PATH.
 
 Generate full XML for the current directory (default):
 
@@ -73,6 +76,12 @@ Deterministic output (omit timestamp and redact root path):
 
 ```bash
 repo2xml --no-timestamp --root-path-mode redact -o context.xml .
+```
+
+More deterministic output (omit timestamp + mtime + size):
+
+```bash
+repo2xml --no-timestamp --no-mtime --no-size --root-path-mode redact -o context.xml .
 ```
 
 Show version:
@@ -95,12 +104,25 @@ Show help:
 repo2xml --help
 ```
 
+### Output selection
+
+These are mutually exclusive:
+- `--stdout`
+- `--clipboard`
+- `--stats-only`
+
 ### Meta and determinism
 
-- `--no-timestamp`
+- `--no-timestamp`  
   Omit `<generated_at_utc>` from the output meta block, for deterministic output.
 
-- `--root-path-mode [absolute|relative|redact]`
+- `--no-mtime`  
+  Omit `mtime_utc` file attributes, for deterministic output.
+
+- `--no-size`  
+  Omit `size` file attributes (determinism / privacy).
+
+- `--root-path-mode [absolute|relative|redact]`  
   How to emit `<root_path>`:
   - `absolute` (default): full resolved path (POSIX separators)
   - `relative`: relative path from current working directory when possible (POSIX separators)
@@ -108,7 +130,7 @@ repo2xml --help
 
 ### Size limits
 
-- `--max-size BYTES`
+- `--max-size BYTES`  
   Maximum size for embedding:
   - text content
   - base64 content (when `--binary base64`)
@@ -117,38 +139,46 @@ repo2xml --help
 
   Note: binary hashing (`--binary hash`) is allowed beyond `--max-size` by default.
 
+### Decoding
+
+- `--decode-errors [replace|strict]`  
+  Text decoding policy:
+  - `replace` (default): best-effort decode with replacement characters
+  - `strict`: fail on decode errors (emitted as `<file skipped="true" error_code="text_decode_error">...`)
+
 ### Reporting
 
-- `--report / --no-report`
+- `--report / --no-report`  
   Print a detailed post-run report with a breakdown of skip/error causes.
 
-- `--stats-only`
+- `--stats-only`  
   Compute and print statistics, but discard generated output bytes.
 
 ### Progress
 
-- `--progress / --no-progress`
+- `--progress / --no-progress`  
   Show progress bars.
+
   Progress is multi-phase:
   - **Scanning**: indeterminate (no total), counts discovered files
   - **Processing**: determinate, counts processed files
 
 ### Redaction
 
-- `--redact-secrets / --no-redact-secrets`
+- `--redact-secrets / --no-redact-secrets`  
   Redact common secret-like patterns from embedded text content (best-effort).
 
 ### Binary detection fast-path
 
-- `--ext-binary-detect / --no-ext-binary-detect`
+- `--ext-binary-detect / --no-ext-binary-detect`  
   Enable/disable binary extension fast-path (default: enabled).
 
-- `--binary-ext-add TEXT`
-  Add extensions to treat as binary (repeatable). Case-insensitive.
+- `--binary-ext-add TEXT`  
+  Add extensions to treat as binary (repeatable). Case-insensitive.  
   Examples: `--binary-ext-add PSD`, `--binary-ext-add .psd`, `--binary-ext-add .tar.zst`
 
-- `--binary-ext-remove TEXT`
-  Remove extensions from the default binary fast-path set (repeatable).
+- `--binary-ext-remove TEXT`  
+  Remove extensions from the default binary fast-path set (repeatable).  
   Example: `--binary-ext-remove .pdf`
 
 ## Output Format
@@ -157,9 +187,28 @@ The output is a single XML document.
 
 Paths in output are always repository-relative and use POSIX separators (`/`), even on Windows.
 
+### Machine-readable skip/error codes
+
+When a file is skipped or fails processing, the XML includes machine-readable attributes:
+
+Skipped (intentional omission):
+
+```xml
+<file ... skipped="true" skip_code="text_size_limit">
+```
+
+Error (failed attempt):
+
+```xml
+<file ... skipped="true" error_code="text_read_error">
+```
+
+If available, a machine-readable `<detail>` block is also emitted (deterministic JSON inside CDATA).
+
 ## Fault Tolerance
 
 `repo2xml` employs a "fail-soft" strategy:
+
 1. **Access Errors:** If a file cannot be read (permissions, locks), it is reported as an `<error>` in the output, but processing continues.
 2. **Directory Access Errors:** If a directory cannot be listed (permissions, transient errors), it is skipped and a warning is logged.
 3. **Scanner Entry Errors:** If a directory entry fails `is_file/stat/readlink`, it is skipped. A summary warning is logged after scanning (without spamming per file).

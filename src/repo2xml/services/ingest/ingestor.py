@@ -245,11 +245,13 @@ class StandardIngestor:
         self,
         *,
         newline_mode: str,  # "preserve" | "lf"
+        decode_errors: str = "replace",  # "replace" | "strict"
         use_ext_fastpath: bool = True,
         binary_ext_add: Optional[Sequence[str]] = None,
         binary_ext_remove: Optional[Sequence[str]] = None,
     ):
         self.newline_mode = newline_mode
+        self.decode_errors = decode_errors
         self.use_ext_fastpath = use_ext_fastpath
         self.binary_ext_add = list(binary_ext_add) if binary_ext_add else []
         self.binary_ext_remove = list(binary_ext_remove) if binary_ext_remove else []
@@ -322,8 +324,18 @@ class StandardIngestor:
         buf.extend(rest)
 
         enc = bom_enc or "utf-8"
+
+        # Decoding strategy:
+        # - replace: best-effort decoding for LLM contexts (default)
+        # - strict: surface encoding problems as errors (useful for correctness audits)
         try:
-            text = buf.decode(enc, errors="replace")
+            if self.decode_errors == "strict":
+                text = buf.decode(enc, errors="strict")
+            else:
+                text = buf.decode(enc, errors="replace")
+        except UnicodeDecodeError as e:
+            err = ErrorInfo(code=ErrorCode.text_decode_error, detail={"encoding": enc, "decode_error": str(e)})
+            return TextReadResult(kind="error", error=err)
         except Exception as e:
             err = ErrorInfo(code=ErrorCode.text_decode_error, detail={"encoding": enc, "decode_error": str(e)})
             return TextReadResult(kind="error", error=err)

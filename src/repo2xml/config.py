@@ -27,6 +27,17 @@ class NewlineMode(str, Enum):
     lf = "lf"
 
 
+class DecodeErrors(str, Enum):
+    """
+    How to handle text decoding errors.
+
+    - replace: decode with replacement characters (best-effort, default)
+    - strict: fail on decode errors (surfaces issues as ErrorPayload)
+    """
+    replace = "replace"
+    strict = "strict"
+
+
 class Formatting(str, Enum):
     """Output formatting style."""
     compact = "compact"  # newlines, no indentation (default)
@@ -79,10 +90,15 @@ class Repo2XMLConfig:
     formatting: Formatting = Formatting.compact
     binary: BinaryMode = BinaryMode.skip
     newline: NewlineMode = NewlineMode.preserve
+    decode_errors: DecodeErrors = DecodeErrors.replace
 
     # Meta output
     include_timestamp: bool = True
     root_path_mode: RootPathMode = RootPathMode.absolute
+
+    # Determinism / privacy toggles for file attributes
+    include_mtime: bool = True
+    include_size: bool = True
 
     # Binary detection fast-path
     binary_ext_fastpath: bool = True

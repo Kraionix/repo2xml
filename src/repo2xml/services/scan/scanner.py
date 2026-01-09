@@ -208,6 +208,36 @@ class FileSystemScanner:
             if is_symlink and self.symlinks_files == "skip":
                 continue
 
+            # Special case: symlink file in "as-link" mode.
+            #
+            # Goal: do NOT touch the symlink target (no follow_symlinks=True checks).
+            # This also ensures broken symlinks are still included in output.
+            if is_symlink and self.symlinks_files == "as-link":
+                symlink_target: Optional[str] = None
+                try:
+                    symlink_target = os.readlink(entry.path)
+                except OSError:
+                    self.stats.entry_readlink_errors += 1
+                    symlink_target = None
+
+                try:
+                    st = entry.stat(follow_symlinks=False)
+                except OSError:
+                    self.stats.entry_stat_errors += 1
+                    continue
+
+                yield FileEntry(
+                    abs_path=Path(entry.path),
+                    rel_path=rel,
+                    name=name,
+                    size=st.st_size,
+                    mtime_ns=getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000)),
+                    is_symlink=True,
+                    symlink_target=symlink_target,
+                )
+                continue
+
+            # Regular file handling (including symlink files in "follow" mode).
             try:
                 is_file = entry.is_file(follow_symlinks=True)
             except OSError:
@@ -217,7 +247,7 @@ class FileSystemScanner:
             if not is_file:
                 continue
 
-            symlink_target: Optional[str] = None
+            symlink_target = None
             if is_symlink:
                 try:
                     symlink_target = os.readlink(entry.path)

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import List, Optional
 
@@ -10,6 +9,7 @@ from repo2xml.application.progress import NullProgressReporter, TqdmProgressRepo
 from repo2xml.cli.ui import LogLevel, setup_logging
 from repo2xml.config import (
     BinaryMode,
+    DecodeErrors,
     Formatting,
     Mode,
     NewlineMode,
@@ -29,16 +29,9 @@ from repo2xml.services.output.targets import (
     StdoutTarget,
 )
 from repo2xml.utils.paths import try_relpath_posix
+from repo2xml.utils.version import tool_version
 
 app = typer.Typer(add_completion=False)
-
-
-def _tool_version() -> str:
-    """Best-effort read package version from metadata."""
-    try:
-        return importlib_metadata.version("repo2xml")
-    except Exception:
-        return "0.0.0"
 
 
 def _print_breakdown(title: str, data: dict[str, int]) -> None:
@@ -125,6 +118,16 @@ def main(
         "--no-timestamp",
         help="Do not emit generated_at_utc (for deterministic output).",
     ),
+    no_mtime: bool = typer.Option(
+        False,
+        "--no-mtime",
+        help="Do not emit mtime_utc attributes (for deterministic output).",
+    ),
+    no_size: bool = typer.Option(
+        False,
+        "--no-size",
+        help="Do not emit size attributes (for deterministic output / privacy).",
+    ),
     root_path_mode: RootPathMode = typer.Option(
         RootPathMode.absolute,
         "--root-path-mode",
@@ -153,7 +156,7 @@ def main(
     progress: bool = typer.Option(
         True,
         "--progress/--no-progress",
-        help="Show progress bars (default: progress).",
+        help="Show progress bars.",
     ),
     report: bool = typer.Option(
         False,
@@ -220,13 +223,24 @@ def main(
         "--newline",
         help="Newline normalization: preserve|lf.",
     ),
+    decode_errors: DecodeErrors = typer.Option(
+        DecodeErrors.replace,
+        "--decode-errors",
+        help="Text decoding errors policy: replace|strict.",
+    ),
 ) -> None:
     """
     repo2xml: convert a repository into a single context document for LLM ingestion.
     """
     if version:
-        typer.echo(f"repo2xml {_tool_version()}")
+        typer.echo(f"repo2xml {tool_version('repo2xml')}")
         raise typer.Exit(code=0)
+
+    # Mutually exclusive output modes.
+    chosen = sum(1 for v in (stdout, clipboard, stats_only) if v)
+    if chosen > 1:
+        typer.echo("Error: --stdout, --clipboard, and --stats-only are mutually exclusive.", err=True)
+        raise typer.Exit(code=2)
 
     logger = setup_logging(log_level)
     root = path.resolve()
@@ -238,12 +252,11 @@ def main(
     user_ignore = list(ignore) if ignore else []
 
     # Auto-exclude output file to prevent self-inclusion loop (file output only).
+    # Important: only exclude if the output path is inside the scanned root.
     if not stdout and not clipboard and not stats_only:
         rel_out = try_relpath_posix(out_abs, root)
-        if rel_out:
+        if rel_out is not None:
             user_ignore.append("/" + rel_out)
-        else:
-            user_ignore.append(out_abs.name)
 
     processors = []
     if redact:
@@ -256,8 +269,11 @@ def main(
             formatting=formatting,
             binary=binary,
             newline=newline,
+            decode_errors=decode_errors,
             include_timestamp=not no_timestamp,
             root_path_mode=root_path_mode,
+            include_mtime=not no_mtime,
+            include_size=not no_size,
             binary_ext_fastpath=ext_binary_detect,
             binary_ext_add=list(binary_ext_add) if binary_ext_add else [],
             binary_ext_remove=list(binary_ext_remove) if binary_ext_remove else [],

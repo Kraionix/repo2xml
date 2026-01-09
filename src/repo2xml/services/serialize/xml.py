@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import html
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Sequence
@@ -52,7 +53,7 @@ def _xml_sanitize_text(s: str) -> str:
     """
     if not s:
         return s
-    out = []
+    out: list[str] = []
     changed = False
     for ch in s:
         cp = ord(ch)
@@ -67,6 +68,17 @@ def _xml_sanitize_text(s: str) -> str:
 def _esc_attr(s: str) -> str:
     """Escape a string for safe use in XML attributes."""
     return html.escape(_xml_sanitize_text(s), quote=True)
+
+
+def _json_detail(detail: dict[str, object]) -> str:
+    """
+    Deterministic JSON serialization for detail dictionaries.
+
+    - sort_keys=True for stable output
+    - separators to avoid whitespace noise
+    - default=str to avoid crashes on unexpected objects
+    """
+    return json.dumps(detail, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
 
 
 # CDATA markers are stored in base64 so this source code does not contain
@@ -98,11 +110,22 @@ class XMLSerializer:
       - "minify": no newlines, no indentation
     """
 
-    def __init__(self, *, formatting: str = "compact"):
+    def __init__(
+        self,
+        *,
+        formatting: str = "compact",
+        include_mtime: bool = True,
+        include_size: bool = True,
+        text_decode_errors: str = "replace",
+    ):
         if formatting not in {"compact", "pretty", "minify"}:
             raise ValueError(f"Unknown formatting: {formatting}")
 
         self.formatting = formatting
+        self.include_mtime = include_mtime
+        self.include_size = include_size
+        self.text_decode_errors = text_decode_errors
+
         self.nl = "" if formatting == "minify" else "\n"
 
     @property
@@ -151,17 +174,18 @@ class XMLSerializer:
 
         Implementation:
         - Use a stack to open/close <dir> elements without building a full tree object.
-        - Avoid redundant sorting when the caller already provides deterministic order.
+        - The pipeline already sorts entries by rel_path for determinism.
+          We avoid building a separate list of paths in the common case.
         """
         nl = self.nl
         write(f"{self._indent(1)}<project_structure>{nl}")
 
-        paths = [e.rel_path for e in entries]
-
-        # Avoid a second sort when the pipeline already sorted entries by rel_path.
-        for i in range(len(paths) - 1):
-            if paths[i] > paths[i + 1]:
-                paths.sort()
+        # Defensive fallback: if someone calls the serializer directly with unsorted entries,
+        # sort them here. This should not happen in the main pipeline path.
+        entries_view: Sequence[FileEntry] = entries
+        for i in range(len(entries) - 1):
+            if entries[i].rel_path > entries[i + 1].rel_path:
+                entries_view = sorted(entries, key=lambda e: e.rel_path)
                 break
 
         stack: list[str] = []
@@ -173,7 +197,8 @@ class XMLSerializer:
                 write(f"{self._indent(level)}</dir>{nl}")
                 stack.pop()
 
-        for rel in paths:
+        for entry in entries_view:
+            rel = entry.rel_path
             parts = rel.split("/")
             dir_parts, file_name = parts[:-1], parts[-1]
 
@@ -215,12 +240,17 @@ class XMLSerializer:
         link_target_override is used for LinkPayload in case the scan did not
         capture a readlink target (platform/permission dependent).
         """
-        attrs = {
+        attrs: dict[str, str] = {
             "path": entry.rel_path,
-            "size": str(entry.size),
             "ext": "".join(Path(entry.rel_path).suffixes),
-            "mtime_utc": _iso_utc_from_mtime_ns(entry.mtime_ns),
         }
+
+        if self.include_size:
+            attrs["size"] = str(entry.size)
+
+        if self.include_mtime:
+            attrs["mtime_utc"] = _iso_utc_from_mtime_ns(entry.mtime_ns)
+
         parts = [f'{k}="{_esc_attr(v)}"' for k, v in attrs.items()]
 
         if entry.is_symlink:
@@ -230,6 +260,12 @@ class XMLSerializer:
                 parts.append(f'link_target="{_esc_attr(target)}"')
 
         return " ".join(parts)
+
+    def _write_detail_if_any(self, detail: dict[str, object], *, indent: str, write: WriteFn) -> None:
+        if not detail:
+            return
+        # Machine-readable detail for downstream processing.
+        write(f"{indent}<detail>{_cdata(_json_detail(detail))}</detail>{self.nl}")
 
     def write_file(self, entry: FileEntry, payload: FilePayload, write: WriteFn) -> None:
         nl = self.nl
@@ -251,8 +287,15 @@ class XMLSerializer:
         attrs = self._file_attr_str(entry)
 
         if isinstance(payload, TextPayload):
+            content_attrs: list[str] = []
+            if payload.encoding:
+                content_attrs.append(f' encoding="{_esc_attr(payload.encoding)}"')
+            # Expose decode policy for reproducibility/debugging.
+            if self.text_decode_errors:
+                content_attrs.append(f' decode_errors="{_esc_attr(self.text_decode_errors)}"')
+
             write(f'{i2}<file {attrs}>{nl}')
-            write(f"{i3}<content>{_cdata(payload.text)}</content>{nl}")
+            write(f"{i3}<content{''.join(content_attrs)}>{_cdata(payload.text)}</content>{nl}")
             write(f"{i2}</file>{nl}")
             return
 
@@ -272,14 +315,16 @@ class XMLSerializer:
             return
 
         if isinstance(payload, SkippedPayload):
-            write(f'{i2}<file {attrs} skipped="true">{nl}')
+            write(f'{i2}<file {attrs} skipped="true" skip_code="{_esc_attr(payload.code.value)}">{nl}')
             write(f"{i3}<error>{html.escape(_xml_sanitize_text(payload.message))}</error>{nl}")
+            self._write_detail_if_any(payload.detail, indent=i3, write=write)
             write(f"{i2}</file>{nl}")
             return
 
         if isinstance(payload, ErrorPayload):
-            write(f'{i2}<file {attrs} skipped="true">{nl}')
+            write(f'{i2}<file {attrs} skipped="true" error_code="{_esc_attr(payload.code.value)}">{nl}')
             write(f"{i3}<error>{html.escape(_xml_sanitize_text(payload.message))}</error>{nl}")
+            self._write_detail_if_any(payload.detail, indent=i3, write=write)
             write(f"{i2}</file>{nl}")
             return
 
