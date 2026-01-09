@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Generator, Optional, Set
 
 from repo2xml.domain.model import FileEntry
-from repo2xml.services.scan.gitignore import GitignoreEngine
+from repo2xml.services.scan.gitignore import GitignoreEngine, IgnoreRuleset
 
 logger = logging.getLogger("repo2xml.scanner")
 
@@ -60,11 +60,13 @@ class ScanStats:
 
 class FileSystemScanner:
     """
-    Single-pass filesystem scanner with an on-the-fly gitignore stack.
+    Single-pass filesystem scanner with a Git-compatible .gitignore stack.
 
-    Optimization note:
-    We try to reduce syscalls by applying ignore checks early. If an entry is ignored by
-    its path alone, we skip it before calling is_dir/is_file/stat where possible.
+    Design notes:
+    - We do not traverse ".git" by default (hard exclude).
+    - We implement correct .gitignore scoping rules using pathspec's gitwildmatch matcher.
+    - For correctness, ignore decisions for directories require knowing whether an entry is a directory,
+      so we generally call is_dir() before ignore checks (still avoiding stat() for ignored entries).
     """
 
     def __init__(
@@ -120,23 +122,27 @@ class FileSystemScanner:
         self._visited_dir_keys = set()
         self.stats = ScanStats()
 
-        patterns: list[str] = list(self.ge.base_patterns)
-        spec = self.ge.compile(patterns)
+        # Start stack with root-scoped base patterns (ALWAYS_IGNORE + user overrides).
+        stack: list[IgnoreRuleset] = [self.ge.base_ruleset()]
 
         # Mark root as visited to avoid pathological loops.
         self._visited_dir_keys.add(self._dir_key(self.root))
 
-        yield from self._scan_dir(self.root, "", patterns, spec)
+        yield from self._scan_dir(self.root, "", stack)
 
-    def _scan_dir(self, dir_abs: Path, dir_rel: str, patterns: list[str], spec) -> Generator[FileEntry, None, None]:
+    def _scan_dir(
+        self,
+        dir_abs: Path,
+        dir_rel: str,
+        stack: list[IgnoreRuleset],
+    ) -> Generator[FileEntry, None, None]:
         # Push local .gitignore rules (if enabled and present).
-        pushed = 0
+        pushed = False
         if self.use_gitignore:
-            local_rules = self.ge.read_dir_gitignore_prefixed(dir_abs, dir_rel)
-            if local_rules:
-                patterns.extend(local_rules)
-                pushed = len(local_rules)
-                spec = self.ge.compile_child_cached(spec, local_rules, patterns)
+            rs = self.ge.load_dir_ruleset(dir_abs=dir_abs, dir_rel_posix=dir_rel)
+            if rs is not None:
+                stack.append(rs)
+                pushed = True
 
         try:
             entries = list(os.scandir(dir_abs))
@@ -144,7 +150,7 @@ class FileSystemScanner:
             self.stats.dirs_scandir_errors += 1
             logger.warning("Cannot read directory: %s (%s)", dir_abs, e)
             if pushed:
-                del patterns[-pushed:]
+                stack.pop()
             return
 
         # Deterministic order: stable output is helpful for diffs and LLM prompts.
@@ -159,11 +165,6 @@ class FileSystemScanner:
 
             rel = f"{dir_rel}/{name}" if dir_rel else name
             rel = rel.replace("\\", "/")
-
-            # Early ignore check by path. If it matches, we can skip without touching the entry.
-            # This reduces syscalls/cost for ignored trees on some platforms.
-            if spec.match_file(rel):
-                continue
 
             try:
                 is_symlink = entry.is_symlink()
@@ -183,14 +184,13 @@ class FileSystemScanner:
                 self.stats.entry_is_dir_errors += 1
                 is_dir = False
 
+            # Git-compatible ignore check (scoped).
+            if self.ge.is_ignored(rel_path_posix=rel, is_dir=is_dir, stack=stack):
+                continue
+
             if is_dir:
                 # If it's a symlinked directory and following is disabled, skip it.
                 if is_symlink and not self.follow_symlinks_dirs:
-                    continue
-
-                # Pruning: if the directory is ignored by directory-only patterns, do not descend.
-                # We already checked spec.match_file(rel) above.
-                if spec.match_file(rel + "/"):
                     continue
 
                 child_dir = Path(entry.path)
@@ -201,7 +201,7 @@ class FileSystemScanner:
                     continue
                 self._visited_dir_keys.add(key)
 
-                yield from self._scan_dir(child_dir, rel, patterns, spec)
+                yield from self._scan_dir(child_dir, rel, stack)
                 continue
 
             # Symlink file handling.
@@ -274,4 +274,4 @@ class FileSystemScanner:
 
         # Pop local rules before returning to parent.
         if pushed:
-            del patterns[-pushed:]
+            stack.pop()

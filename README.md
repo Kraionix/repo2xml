@@ -2,7 +2,7 @@
 
 Convert a source code repository into a single, structured context document for LLM ingestion.
 
-`repo2xml` walks a repository, applies `.gitignore`-style filtering (recursively, via a gitignore stack), emits a directory tree, and (optionally) embeds file contents with metadata in a deterministic format.
+`repo2xml` walks a repository, applies `.gitignore` filtering (recursively, via a Git-compatible scoped gitignore stack), emits a directory tree, and (optionally) embeds file contents with metadata in a deterministic format.
 
 The internal architecture is pipeline-based (Scan → Ingest → Serialize → Write). This makes it easier to add future output formats (JSON), API layers (gRPC/HTTP), and agent integrations, while keeping the current CLI behavior stable.
 
@@ -14,29 +14,38 @@ The internal architecture is pipeline-based (Scan → Ingest → Serialize → W
   - `full`: metadata + content (default)
   - `metadata`: metadata only (no content reads; not treated as "skipped")
   - `structure`: structure only
+
 - **Robust Filtering**:
-  - Respects `.gitignore` (enabled by default).
-  - Extra `--ignore` patterns.
-  - **Force Include** (`--include`) to override gitignore rules (un-ignore).
+  - Respects `.gitignore` with correct scoping rules (patterns are applied relative to the directory containing the `.gitignore`).
+  - Extra `--ignore` patterns (gitignore syntax).
+  - **Force Include** (`--include`) to override ignore rules (un-ignore, gitignore syntax).
   - **Hard excludes** (e.g. `.git`) preventing accidental traversal.
+
 - **Smart Symlink Handling**:
   - Can treat symlink files as links (`as-link`) to save tokens and avoid touching link targets.
   - Broken symlink files are still included in output in `as-link` mode.
   - Safe directory traversal with cycle protection (when following symlink dirs).
+
 - **Fault Tolerance**: Read errors (permissions, encoding) do not crash the tool; they are reported as `<error>` tags within the output.
+
 - **Binary handling**: skip, embed as base64, or store SHA-256 hash.
   - `base64` and `hash` are computed in a streaming fashion (no full binary read into memory).
+
 - **Binary extension fast-path** (configurable):
   - Case-insensitive (PNG == png).
   - Can be disabled or extended via CLI options.
+
 - **Formatting modes**: `compact` (default), `pretty` (indented), or `minify`.
+
 - **Output**: File or stdout; optional gzip/zstd compression; clipboard support.
+
 - **Deterministic output options**:
   - `--no-timestamp` omits `generated_at_utc` for stable diffs.
   - `--no-mtime` omits `mtime_utc` attributes for stable diffs.
   - `--no-size` omits `size` attributes (determinism / privacy).
   - `--root-path-mode relative|redact` avoids leaking absolute paths.
   - `<root_path>` always uses POSIX separators (`/`) for reproducibility.
+
 - **Built-in safety**:
   - `--redact-secrets` redacts common secret-like patterns (best-effort) from embedded text.
 
@@ -204,6 +213,17 @@ Error (failed attempt):
 ```
 
 If available, a machine-readable `<detail>` block is also emitted (deterministic JSON inside CDATA).
+
+## Gitignore compatibility
+
+`repo2xml` implements Git-compatible `.gitignore` scoping:
+
+- Each `.gitignore` applies to files under its directory.
+- Patterns are matched against paths relative to the directory containing that `.gitignore`.
+- The last matching pattern wins across all applicable `.gitignore` files.
+- `.git` is not traversed by default (hard excluded), and ignore files inside `.git` are not considered.
+
+Note: compatibility with Git index (tracked files ignoring `.gitignore`) is intentionally out of scope.
 
 ## Fault Tolerance
 
