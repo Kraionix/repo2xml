@@ -1,0 +1,1 @@
+"""Ingestion subsystem (safe content reading + classification)."""

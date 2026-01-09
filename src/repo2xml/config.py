@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List
+from typing import Callable, List, Optional
 
 
 class Mode(str, Enum):
@@ -26,7 +26,7 @@ class NewlineMode(str, Enum):
 
 
 class Formatting(str, Enum):
-    """XML formatting style."""
+    """Output formatting style."""
     compact = "compact"  # newlines, no indentation (default)
     pretty = "pretty"    # newlines + TAB indentation
     minify = "minify"    # no newlines, no indentation
@@ -36,12 +36,12 @@ class SymlinkFilesMode(str, Enum):
     """How to treat symlink files."""
     follow = "follow"     # read the target (normal file behavior)
     skip = "skip"         # skip symlink files entirely
-    as_link = "as-link"   # emit metadata only + link target, no content reads
+    as_link = "as-link"   # emit metadata + link target, no content reads
 
 
 class RootPathMode(str, Enum):
     """
-    How to represent <root_path> in the XML meta block.
+    How to represent <root_path> in the meta block.
 
     - absolute: full resolved path (default)
     - relative: relative to current working directory when possible
@@ -52,12 +52,24 @@ class RootPathMode(str, Enum):
     redact = "redact"
 
 
+# Content processors are intentionally typed as Callables to keep config lightweight.
+# Future: introduce a dedicated protocol if/when processors become a public extension API.
+ContentProcessor = Callable[[str], str]
+
+
 @dataclass(slots=True)
 class Repo2XMLConfig:
     """
-    Configuration DTO for the Repo2XML engine.
-    Decouples the core logic from CLI arguments.
+    Configuration DTO for the repo2xml pipeline.
+
+    Design note:
+    This config intentionally stays "simple data". Component wiring and orchestration
+    happens in the facade/pipeline layers.
     """
+    # Output selection (future-proof; currently only "xml" is implemented)
+    format: str = "xml"
+
+    # Output behavior
     mode: Mode = Mode.full
     formatting: Formatting = Formatting.compact
     binary: BinaryMode = BinaryMode.skip
@@ -67,7 +79,7 @@ class Repo2XMLConfig:
     include_timestamp: bool = True
     root_path_mode: RootPathMode = RootPathMode.absolute
 
-    # Binary detection
+    # Binary detection fast-path
     binary_ext_fastpath: bool = True
     binary_ext_add: List[str] = field(default_factory=list)
     binary_ext_remove: List[str] = field(default_factory=list)
@@ -84,3 +96,7 @@ class Repo2XMLConfig:
 
     # Ingestion limits
     max_file_size: int = 100_000
+
+    # Optional content processors (text-only). Not exposed via CLI yet.
+    # Processors are applied in order to ingested text content.
+    text_processors: List[Callable[[str], str]] = field(default_factory=list)

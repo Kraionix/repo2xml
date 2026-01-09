@@ -1,17 +1,13 @@
 from __future__ import annotations
 
-import gzip
-import sys
 import io
-import pyperclip
-from enum import Enum
 from pathlib import Path
-from typing import BinaryIO, Callable, List, Optional
+from typing import List, Optional
 
+import pyperclip
 import typer
-from tqdm import tqdm
 
-from repo2xml.api import Repo2XML
+from repo2xml.application.progress import NullProgressReporter, TqdmProgressReporter
 from repo2xml.config import (
     BinaryMode,
     Formatting,
@@ -22,70 +18,10 @@ from repo2xml.config import (
     SymlinkFilesMode,
 )
 from repo2xml.cli.ui import LogLevel, setup_logging
+from repo2xml.facade import Repo2XML
+from repo2xml.services.output.targets import CompressMode, open_output_stream, try_relpath_posix
 
 app = typer.Typer(add_completion=False)
-
-
-class CompressMode(str, Enum):
-    """Output compression for the whole XML stream."""
-    none = "none"
-    gzip = "gzip"
-    zstd = "zstd"
-
-
-def _open_output_stream(
-    *,
-    output_path: Path,
-    use_stdout: bool,
-    compress: CompressMode,
-) -> tuple[BinaryIO, Callable[[], None]]:
-    """
-    Open an output stream for the XML bytes.
-    Handles File vs Stdout and Compression transparently.
-
-    Returns: (binary_stream, closer_callback)
-    """
-    if use_stdout:
-        base: BinaryIO = sys.stdout.buffer
-        if compress == CompressMode.none:
-            return base, lambda: None
-
-        if compress == CompressMode.gzip:
-            gz = gzip.GzipFile(fileobj=base, mode="wb")
-            return gz, gz.close
-
-        if compress == CompressMode.zstd:
-            import zstandard as zstd  # type: ignore
-            cctx = zstd.ZstdCompressor(level=3)
-            zw = cctx.stream_writer(base)
-            return zw, zw.close
-
-    # File output
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    raw = open(output_path, "wb")
-
-    if compress == CompressMode.none:
-        return raw, raw.close
-
-    if compress == CompressMode.gzip:
-        gz = gzip.GzipFile(fileobj=raw, mode="wb")
-        return gz, lambda: (gz.close(), raw.close())
-
-    if compress == CompressMode.zstd:
-        import zstandard as zstd  # type: ignore
-        cctx = zstd.ZstdCompressor(level=3)
-        zw = cctx.stream_writer(raw)
-        return zw, lambda: (zw.close(), raw.close())
-
-    return raw, raw.close
-
-
-def _try_relpath(child: Path, root: Path) -> Optional[str]:
-    """Return POSIX relative path if child is inside root, else None."""
-    try:
-        return child.resolve().relative_to(root.resolve()).as_posix()
-    except Exception:
-        return None
 
 
 @app.callback(invoke_without_command=True)
@@ -123,7 +59,7 @@ def main(
     formatting: Formatting = typer.Option(
         Formatting.compact,
         "--formatting",
-        help="XML formatting.",
+        help="Output formatting.",
     ),
     mode: Mode = typer.Option(
         Mode.full,
@@ -158,7 +94,7 @@ def main(
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
-        help="Do not write XML. Only list files that would be processed.",
+        help="Do not write output. Only list files that would be processed.",
     ),
     progress: bool = typer.Option(
         True,
@@ -222,7 +158,7 @@ def main(
     ),
 ) -> None:
     """
-    repo2xml: convert a repository into a single XML context for LLM ingestion.
+    repo2xml: convert a repository into a single context document for LLM ingestion.
     """
     logger = setup_logging(log_level)
     root = path.resolve()
@@ -230,20 +166,21 @@ def main(
     # Determine absolute output path for exclusion logic
     out_abs = output.resolve() if output.is_absolute() else (Path.cwd() / output).resolve()
 
-    # Prepare configuration
+    # Prepare ignore patterns
     user_ignore = list(ignore) if ignore else []
 
     # Auto-exclude output file to prevent self-inclusion loop.
     # If the output is inside the scanned root, anchor it to repo root ("/...") so we do not
     # accidentally ignore other same-named files elsewhere in the tree.
     if not stdout and not clipboard:
-        rel_out = _try_relpath(out_abs, root)
+        rel_out = try_relpath_posix(out_abs, root)
         if rel_out:
             user_ignore.append("/" + rel_out)
         else:
             user_ignore.append(out_abs.name)
 
     config = Repo2XMLConfig(
+        format="xml",
         mode=mode,
         formatting=formatting,
         binary=binary,
@@ -268,29 +205,30 @@ def main(
     if dry_run:
         logger.info("Dry-run mode: Listing files only.")
         try:
-            for node in engine.scan():
-                print(node.rel_path)
+            for entry in engine.scan():
+                print(entry.rel_path)
         except KeyboardInterrupt:
             logger.warning("Interrupted.")
             raise typer.Exit(code=130)
         return
 
-    # 1. Clipboard Mode
+    # Clipboard Mode
     if clipboard:
         logger.info("Mode: Clipboard. Buffering output...")
         mem_buffer = io.BytesIO()
 
         try:
-            if progress:
-                with tqdm(desc="Processing", unit="file") as pbar:
-                    engine.export(mem_buffer, progress_callback=lambda n: pbar.update(n))
-            else:
-                engine.export(mem_buffer)
+            reporter = TqdmProgressReporter() if progress else NullProgressReporter()
+            engine.export(mem_buffer, progress_callback=reporter.advance if progress else None)
 
-            # Decode (XML is text) and copy
             xml_content = mem_buffer.getvalue().decode("utf-8")
             pyperclip.copy(xml_content)
-            logger.info("Success! XML context copied to clipboard (%d chars).", len(xml_content))
+            logger.info("Success! Context copied to clipboard (%d chars).", len(xml_content))
+
+            try:
+                reporter.finish()
+            except Exception:
+                pass
 
         except pyperclip.PyperclipException as e:
             logger.error("Clipboard error: %s", e)
@@ -301,9 +239,9 @@ def main(
             raise typer.Exit(code=1)
         return
 
-    # 2. Standard File / Stdout Mode
+    # File / Stdout Mode
     try:
-        out_stream, closer = _open_output_stream(
+        out_stream, closer = open_output_stream(
             output_path=out_abs,
             use_stdout=stdout,
             compress=compress,
@@ -314,9 +252,9 @@ def main(
 
     try:
         if progress:
-            # Wrap progress callback
-            with tqdm(desc="Processing", unit="file") as pbar:
-                engine.export(out_stream, progress_callback=lambda n: pbar.update(n))
+            reporter = TqdmProgressReporter()
+            engine.export(out_stream, progress_callback=reporter.advance)
+            reporter.finish()
         else:
             engine.export(out_stream)
 

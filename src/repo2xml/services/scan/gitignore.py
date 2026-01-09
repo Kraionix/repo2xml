@@ -5,7 +5,7 @@ from typing import List, Optional
 
 import pathspec
 
-# Patterns always ignored (noise reduction). These are *soft* ignores:
+# Patterns always ignored (noise reduction). These are soft ignores:
 # a later negation pattern (e.g., "!...") could re-include them if desired.
 ALWAYS_IGNORE = [
     ".idea",
@@ -83,23 +83,17 @@ def _prefix_pattern(base_dir_rel: str, pat: str) -> str:
     return ("!" if neg else "") + pref
 
 
-class FilterEngine:
+class GitignoreEngine:
     """
-    Filtering utilities.
+    gitignore compilation utilities.
 
-    Important design choice:
-    - This class does NOT walk the filesystem.
-    - The scanner reads .gitignore files "on the fly" and pushes/pops rules
-      as it traverses directories (a gitignore stack).
-
-    FilterEngine responsibilities:
-    - Hold base patterns (ALWAYS_IGNORE + user ignore/include).
-    - Read a directory's .gitignore and prefix its rules.
-    - Compile PathSpec objects and cache child specs for efficiency.
+    This class does not walk the filesystem. The scanner reads .gitignore files
+    on the fly and uses this engine to prefix/compile patterns efficiently.
     """
 
     def __init__(
         self,
+        *,
         root_path: Path,
         user_ignore: Optional[List[str]] = None,
         user_include: Optional[List[str]] = None,

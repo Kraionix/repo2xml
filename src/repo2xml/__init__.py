@@ -1,10 +1,21 @@
 """
-repo2xml - Convert source code repositories into structured XML for LLMs.
+repo2xml - Convert source code repositories into a structured context document for LLMs.
 
-Exposes the high-level API and Configuration object for library usage.
+Public API:
+- Repo2XML: high-level facade for library usage
+- Repo2XMLConfig and enums: configuration primitives
 """
 
-from .api import Repo2XML
-from .config import Repo2XMLConfig, Mode, BinaryMode, Formatting, RootPathMode
+from .facade import Repo2XML
+from .config import Repo2XMLConfig, Mode, BinaryMode, Formatting, RootPathMode, NewlineMode, SymlinkFilesMode
 
-__all__ = ["Repo2XML", "Repo2XMLConfig", "Mode", "BinaryMode", "Formatting", "RootPathMode"]
+__all__ = [
+    "Repo2XML",
+    "Repo2XMLConfig",
+    "Mode",
+    "BinaryMode",
+    "Formatting",
+    "RootPathMode",
+    "NewlineMode",
+    "SymlinkFilesMode",
+]

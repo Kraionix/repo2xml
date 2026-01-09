@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Generator, Optional, Set
 
-from .domain import FileNode
-from .filters import FilterEngine
+from repo2xml.domain.model import FileEntry
+from repo2xml.services.scan.gitignore import GitignoreEngine
 
 logger = logging.getLogger("repo2xml.scanner")
 
@@ -58,9 +58,9 @@ class ScanStats:
         return ", ".join(parts) if parts else "no issues"
 
 
-class RepositoryScanner:
+class FileSystemScanner:
     """
-    Single-pass repository scanner with an on-the-fly gitignore stack.
+    Single-pass filesystem scanner with an on-the-fly gitignore stack.
 
     Key behaviors:
     - Only one filesystem traversal (no pre-scan for .gitignore files).
@@ -74,16 +74,16 @@ class RepositoryScanner:
 
     def __init__(
         self,
-        root: Path,
-        filter_engine: FilterEngine,
         *,
+        root: Path,
+        gitignore_engine: GitignoreEngine,
         use_gitignore: bool = True,
         follow_symlinks_dirs: bool = False,
         symlinks_files: str = "follow",  # follow|skip|as-link
         hard_exclude_dirs: Optional[Set[str]] = None,
     ):
         self.root = root.resolve()
-        self.fe = filter_engine
+        self.ge = gitignore_engine
         self.use_gitignore = use_gitignore
         self.follow_symlinks_dirs = follow_symlinks_dirs
         self.symlinks_files = symlinks_files
@@ -93,7 +93,6 @@ class RepositoryScanner:
         # otherwise by resolved path string. This matters when following symlink dirs.
         self._visited_dir_keys: set[tuple[int, int] | str] = set()
 
-        # Collected stats for post-scan summary logging.
         self.stats = ScanStats()
 
     def _dir_key(self, p: Path) -> tuple[int, int] | str:
@@ -116,44 +115,37 @@ class RepositoryScanner:
         except Exception:
             return str(p)
 
-    def scan(self) -> Generator[FileNode, None, None]:
+    def scan(self) -> Generator[FileEntry, None, None]:
         """
-        Yield FileNode entries lazily.
+        Yield FileEntry entries lazily.
 
-        Implementation detail:
-        We keep a single mutable list of patterns (stack-like) and extend/delete
-        as we traverse directories. This avoids repeated list allocations.
-
-        Important:
-        A single RepositoryScanner instance may be reused (library usage), so we must
-        reset per-run state (visited set and stats) at the start of each scan.
+        A single FileSystemScanner instance may be reused (library usage), so we reset
+        per-run state (visited set and stats) at the start of each scan.
         """
         self._visited_dir_keys = set()
         self.stats = ScanStats()
 
-        patterns: list[str] = list(self.fe.base_patterns)
-        spec = self.fe.compile(patterns)
+        patterns: list[str] = list(self.ge.base_patterns)
+        spec = self.ge.compile(patterns)
 
         # Mark root as visited to avoid pathological loops.
         self._visited_dir_keys.add(self._dir_key(self.root))
 
         yield from self._scan_dir(self.root, "", patterns, spec)
 
-    def _scan_dir(self, dir_abs: Path, dir_rel: str, patterns: list[str], spec) -> Generator[FileNode, None, None]:
+    def _scan_dir(self, dir_abs: Path, dir_rel: str, patterns: list[str], spec) -> Generator[FileEntry, None, None]:
         # Push local .gitignore rules (if enabled and present).
         pushed = 0
         if self.use_gitignore:
-            local_rules = self.fe.read_dir_gitignore_prefixed(dir_abs, dir_rel)
+            local_rules = self.ge.read_dir_gitignore_prefixed(dir_abs, dir_rel)
             if local_rules:
                 patterns.extend(local_rules)
                 pushed = len(local_rules)
-                spec = self.fe.compile_child_cached(spec, local_rules, patterns)
+                spec = self.ge.compile_child_cached(spec, local_rules, patterns)
 
         try:
             entries = list(os.scandir(dir_abs))
         except OSError as e:
-            # Permissions / transient filesystem errors: skip this directory.
-            # Keep scanning other directories (fail-soft), but make it visible to users.
             self.stats.dirs_scandir_errors += 1
             logger.warning("Cannot read directory: %s (%s)", dir_abs, e)
             if pushed:
@@ -179,18 +171,26 @@ class RepositoryScanner:
                 self.stats.entry_is_symlink_errors += 1
                 is_symlink = False
 
-            # Directory handling (do not follow symlink dirs unless enabled).
+            # Directory detection:
+            # - For regular entries: do not follow symlinks
+            # - For symlink entries: follow only if enabled
             try:
-                is_dir_no_follow = entry.is_dir(follow_symlinks=False)
+                if is_symlink:
+                    is_dir = entry.is_dir(follow_symlinks=self.follow_symlinks_dirs)
+                else:
+                    is_dir = entry.is_dir(follow_symlinks=False)
             except OSError:
                 self.stats.entry_is_dir_errors += 1
-                is_dir_no_follow = False
+                is_dir = False
 
-            if is_dir_no_follow:
+            if is_dir:
+                # If it's a symlinked directory and following is disabled, skip it.
                 if is_symlink and not self.follow_symlinks_dirs:
                     continue
 
                 # Pruning: if the directory is ignored, do not descend.
+                # Note: this is an approximation of git behavior; re-includes inside ignored
+                # directories may require explicitly un-ignoring the directory path itself.
                 if spec.match_file(rel) or spec.match_file(rel + "/"):
                     continue
 
@@ -206,11 +206,6 @@ class RepositoryScanner:
                 continue
 
             # Symlink file handling.
-            # Important note:
-            # - For "as-link" mode we still need to *discover* symlinked files.
-            #   Using is_file(follow_symlinks=False) often returns False for symlink entries,
-            #   so we always classify files with follow_symlinks=True and control "content reads"
-            #   later in the API layer.
             if is_symlink and self.symlinks_files == "skip":
                 continue
 
@@ -234,16 +229,15 @@ class RepositoryScanner:
                     self.stats.entry_readlink_errors += 1
                     symlink_target = None
 
-            # File stat: we follow symlinks here to get stable metadata about the target file.
-            # The actual content read is controlled later (Repo2XML._process_node).
+            # File stat: follow symlinks to get stable metadata about the target file.
             try:
                 st = entry.stat(follow_symlinks=True)
             except OSError:
                 self.stats.entry_stat_errors += 1
                 continue
 
-            yield FileNode(
-                path=Path(entry.path),
+            yield FileEntry(
+                abs_path=Path(entry.path),
                 rel_path=rel,
                 name=name,
                 size=st.st_size,

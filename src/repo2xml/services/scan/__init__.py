@@ -1,0 +1,1 @@
+"""Scanning subsystem (filesystem traversal + filtering)."""
