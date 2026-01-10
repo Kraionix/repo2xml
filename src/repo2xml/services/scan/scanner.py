@@ -154,8 +154,9 @@ class FileSystemScanner:
                 stack.pop()
             return
 
-        # Deterministic order: stable output is helpful for diffs and LLM prompts.
-        entries.sort(key=lambda e: e.name)
+        # Performance:
+        # - Do not sort entries here. The export pipeline collects and sorts all FileEntry
+        #   objects globally by rel_path, so per-directory sorting is redundant overhead.
 
         for entry in entries:
             name = entry.name
