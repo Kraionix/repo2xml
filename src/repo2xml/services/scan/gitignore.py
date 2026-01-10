@@ -252,14 +252,15 @@ class GitignoreEngine:
           repo-root-relative path using POSIX separators (no leading slash).
 
         The stack must contain rulesets from root to current directory (in that order).
+
+        Performance note:
+        - This method assumes the provided stack is already correctly scoped for rel_path_posix.
+          In the scanner hot path this is always true, so we avoid per-ruleset scope checks.
         """
         # Iterate rulesets from deepest to root: last match wins.
         for ruleset in reversed(stack):
-            # Defensive: ensure the ruleset scope contains the target.
-            if ruleset.base_prefix and not rel_path_posix.startswith(ruleset.base_prefix):
-                continue
-
-            subpath = rel_path_posix[len(ruleset.base_prefix) :] if ruleset.base_prefix else rel_path_posix
+            prefix_len = len(ruleset.base_prefix)
+            subpath = rel_path_posix[prefix_len:] if prefix_len else rel_path_posix
             candidates = self._candidates(subpath, is_dir=is_dir)
 
             # Iterate patterns from bottom to top: last matching pattern wins.

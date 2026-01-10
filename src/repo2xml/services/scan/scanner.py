@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Generator, Optional, Set
@@ -164,7 +165,6 @@ class FileSystemScanner:
                 continue
 
             rel = f"{dir_rel}/{name}" if dir_rel else name
-            rel = rel.replace("\\", "/")
 
             try:
                 is_symlink = entry.is_symlink()
@@ -238,13 +238,17 @@ class FileSystemScanner:
                 continue
 
             # Regular file handling (including symlink files in "follow" mode).
+            #
+            # Performance:
+            # - Avoid extra stat-like work by using a single stat() call and checking st_mode
+            #   instead of calling entry.is_file() and then entry.stat() again.
             try:
-                is_file = entry.is_file(follow_symlinks=True)
+                st = entry.stat(follow_symlinks=True)
             except OSError:
-                self.stats.entry_is_file_errors += 1
+                self.stats.entry_stat_errors += 1
                 continue
 
-            if not is_file:
+            if not stat.S_ISREG(st.st_mode):
                 continue
 
             symlink_target = None
@@ -254,13 +258,6 @@ class FileSystemScanner:
                 except OSError:
                     self.stats.entry_readlink_errors += 1
                     symlink_target = None
-
-            # File stat: follow symlinks to get stable metadata about the target file.
-            try:
-                st = entry.stat(follow_symlinks=True)
-            except OSError:
-                self.stats.entry_stat_errors += 1
-                continue
 
             yield FileEntry(
                 abs_path=Path(entry.path),

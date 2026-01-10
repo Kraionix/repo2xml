@@ -25,7 +25,8 @@ class FileEntry:
     @property
     def ext(self) -> str:
         """Joined suffixes (e.g. '.tar.gz')."""
-        return "".join(Path(self.rel_path).suffixes)
+        # Use the basename only (faster and semantically correct for extensions).
+        return "".join(Path(self.name).suffixes)
 
 
 @dataclass(slots=True)
