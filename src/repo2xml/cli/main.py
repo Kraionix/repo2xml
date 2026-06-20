@@ -1,5 +1,7 @@
+# src/repo2xml/cli/main.py
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import List, Optional
 
@@ -173,6 +175,11 @@ def main(
         "--log-level",
         help="Logging verbosity.",
     ),
+    validate_xml: bool = typer.Option(
+        False,
+        "--validate-xml",
+        help="Validate the generated XML document by parsing it after writing (only for file output).",
+    ),
     # Filtering options
     gitignore: bool = typer.Option(
         True,
@@ -343,6 +350,19 @@ def main(
         if report:
             _print_breakdown("Skipped by cause:", stats.skipped_by_code)
             _print_breakdown("Errors by cause:", stats.errors_by_code)
+
+        # Optional XML validation for file output
+        if validate_xml and isinstance(target, FileTarget):
+            xml_path = target.path
+            try:
+                ET.parse(xml_path)
+                logger.info("XML validation passed: %s", xml_path)
+            except ET.ParseError as e:
+                logger.error("XML validation failed for %s: %s", xml_path, e)
+                raise typer.Exit(code=3)
+            except Exception as e:
+                logger.error("Cannot validate XML file %s: %s", xml_path, e)
+                raise typer.Exit(code=3)
 
     except KeyboardInterrupt:
         logger.warning("Interrupted.")

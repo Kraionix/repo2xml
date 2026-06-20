@@ -1,5 +1,7 @@
+# src/repo2xml/services/scan/gitignore.py
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
@@ -13,6 +15,7 @@ except Exception:  # pragma: no cover
     # Fallback for older pathspec layouts (best-effort).
     from pathspec.patterns import GitWildMatchPattern as _GitWildMatchPattern  # type: ignore
 
+logger = logging.getLogger("repo2xml.gitignore")
 
 # Patterns always ignored (noise reduction). These are soft ignores:
 # a later negation pattern (e.g., "!...") could re-include them if desired.
@@ -132,7 +135,7 @@ def _read_gitignore_file_lines(p: Path) -> List[str]:
         return []
 
 
-def _compile_patterns(lines: Sequence[str]) -> Tuple[_GitWildMatchPattern, ...]:
+def _compile_patterns(lines: Sequence[str], *, source: str = "<unknown>") -> Tuple[_GitWildMatchPattern, ...]:
     """
     Compile normalized gitignore lines into gitwildmatch pattern objects.
 
@@ -147,7 +150,8 @@ def _compile_patterns(lines: Sequence[str]) -> Tuple[_GitWildMatchPattern, ...]:
             pats.append(_GitWildMatchPattern(norm))
         except Exception:
             # Best-effort: skip patterns that the matcher cannot compile.
-            # Git itself ignores some malformed patterns.
+            # Git itself ignores some malformed patterns, but we log a warning.
+            logger.warning("Invalid gitignore pattern in %s: %r", source, line)
             continue
     return tuple(pats)
 
@@ -190,7 +194,7 @@ class GitignoreEngine:
         self._base_ruleset = IgnoreRuleset(
             base_dir_rel="",
             base_prefix="",
-            patterns=_compile_patterns(base_lines),
+            patterns=_compile_patterns(base_lines, source="<built-in rules>"),
         )
 
         # Cache compiled pattern tuples for .gitignore files (keyed by absolute path).
@@ -215,7 +219,7 @@ class GitignoreEngine:
         pats = self._compiled_cache.get(gi_path)
         if pats is None:
             lines = _read_gitignore_file_lines(gi)
-            pats = _compile_patterns(lines)
+            pats = _compile_patterns(lines, source=str(gi_path))
             self._compiled_cache[gi_path] = pats
 
         if not pats:

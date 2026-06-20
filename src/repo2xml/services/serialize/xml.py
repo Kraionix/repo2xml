@@ -57,10 +57,16 @@ def _xml_sanitize_text(s: str) -> str:
     """
     Replace characters that are illegal in XML 1.0 with U+FFFD.
 
-    This prevents generating XML documents that fail to parse due to control chars.
+    Also preemptively neutralises potential XXE vectors (<!ENTITY, <!DOCTYPE)
+    by replacing them with their escaped equivalents before standard XML escaping.
     """
     if not s:
         return s
+
+    # Defang potential XXE injections even before the regular escaping pass.
+    s = s.replace("<!ENTITY", "&lt;!ENTITY")
+    s = s.replace("<!DOCTYPE", "&lt;!DOCTYPE")
+
     out: list[str] = []
     changed = False
     for ch in s:
@@ -116,6 +122,10 @@ class XMLSerializer:
       - "compact" (default): newlines, no indentation
       - "pretty": newlines + TAB indentation
       - "minify": no newlines, no indentation
+
+    All dynamically inserted values are aggressively sanitised against illegal XML
+    characters and potential XXE vectors. The serialiser never emits raw user data
+    outside of CDATA sections or escaped attribute values.
     """
 
     def __init__(

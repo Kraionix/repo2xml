@@ -1,3 +1,4 @@
+# src/repo2xml/services/ingest/redact.py
 from __future__ import annotations
 
 import re
@@ -11,9 +12,19 @@ _RE_PRIVATE_KEY_BLOCK = re.compile(
     re.MULTILINE,
 )
 
+# High-confidence tokens
 _RE_AWS_ACCESS_KEY_ID = re.compile(r"\bAKIA[0-9A-Z]{16}\b")
-_RE_GITHUB_TOKEN = re.compile(r"\bghp_[A-Za-z0-9]{30,}\b")
-_RE_GENERIC_TOKEN = re.compile(r"(?i)\b(token|api[_-]?key|secret)\b\s*[:=]\s*([A-Za-z0-9_\-]{16,})")
+_RE_GITHUB_TOKEN = re.compile(r"\bgh[opurs]_[A-Za-z0-9]{30,}\b")
+_RE_SLACK_TOKEN = re.compile(r"\bxox[abpra]-[A-Za-z0-9-]+\b")
+_RE_STRIPE_SECRET_KEY = re.compile(r"\b[rs]k_live_[A-Za-z0-9]{24,}\b")
+
+# JWT: three base64url sections separated by dots, starting with eyJ
+_RE_JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{20,}\.eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b")
+
+# Credentials in key=value patterns (case-insensitive keywords)
+_RE_CREDENTIAL_PATTERN = re.compile(
+    r"(?i)\b(password|passwd|pwd|secret|token|api[_-]?key)\b\s*[:=]\s*\S+",
+)
 
 
 def redact_secrets(text: str) -> str:
@@ -34,12 +45,17 @@ def redact_secrets(text: str) -> str:
     # High-confidence tokens.
     out = _RE_AWS_ACCESS_KEY_ID.sub("<redacted:aws-access-key-id>", out)
     out = _RE_GITHUB_TOKEN.sub("<redacted:github-token>", out)
+    out = _RE_SLACK_TOKEN.sub("<redacted:slack-token>", out)
+    out = _RE_STRIPE_SECRET_KEY.sub("<redacted:stripe-secret-key>", out)
 
-    # Generic "token/api_key/secret = VALUE" patterns.
+    # JWT tokens (header.payload.signature).
+    out = _RE_JWT.sub("<redacted:jwt>", out)
+
+    # Generic "key = value" patterns for common credential names.
     def _sub_generic(m: re.Match) -> str:
         key = m.group(1)
-        return f"{key}=<redacted:token>"
+        return f"{key}=<redacted:{key}>"
 
-    out = _RE_GENERIC_TOKEN.sub(_sub_generic, out)
+    out = _RE_CREDENTIAL_PATTERN.sub(_sub_generic, out)
 
     return out
