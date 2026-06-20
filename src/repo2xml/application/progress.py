@@ -24,6 +24,15 @@ class ProgressReporter(Protocol):
     def set_phase(self, phase: str) -> None:
         ...
 
+    def set_warning_count(self, count: int) -> None:
+        """Optionally display accumulated warning count."""
+        # Default no-op implementation for reporters that don't support it.
+        return
+
+    def set_postfix(self, text: str) -> None:
+        """Optionally display extra information (e.g., current file)."""
+        return
+
 
 @dataclass(slots=True)
 class NullProgressReporter:
@@ -74,6 +83,12 @@ class CallbackProgressReporter:
         return
 
     def set_phase(self, phase: str) -> None:
+        return
+
+    def set_warning_count(self, count: int) -> None:
+        return
+
+    def set_postfix(self, text: str) -> None:
         return
 
 

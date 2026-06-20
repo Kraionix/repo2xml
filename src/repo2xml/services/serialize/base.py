@@ -1,7 +1,8 @@
+# src/repo2xml/services/serialize/base.py
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Callable, Protocol, Sequence
+from typing import Callable, Dict, Protocol, Sequence, Type
 
 from repo2xml.domain.model import ExportMeta, FileEntry, FilePayload
 
@@ -38,11 +39,33 @@ class Serializer(Protocol):
         ...
 
 
+class PayloadDispatcher:
+    """
+    A registry-based dispatcher for serializing FilePayload variants.
+
+    Subclasses register handlers for each concrete payload type.
+    The dispatch method looks up the handler based on the type of the payload.
+    """
+
+    def __init__(self) -> None:
+        self._handlers: Dict[Type[FilePayload], Callable[..., None]] = {}
+
+    def register(self, payload_type: Type[FilePayload], handler: Callable[..., None]) -> None:
+        self._handlers[payload_type] = handler
+
+    def dispatch(self, payload: FilePayload, entry: FileEntry, write: WriteFn) -> None:
+        handler = self._handlers.get(type(payload))
+        if handler is None:
+            raise TypeError(f"No handler registered for payload type {type(payload).__name__}")
+        handler(entry, payload, write)
+
+
 class BaseSerializer(ABC):
     """
-    Abstract base serializer providing common formatting logic.
+    Abstract base serializer providing common formatting logic and a payload dispatcher.
 
-    Subclasses only need to implement the format‑specific write_* methods.
+    Subclasses only need to implement the format‑specific write_* methods
+    and register payload handlers.
     """
 
     def __init__(
@@ -58,6 +81,13 @@ class BaseSerializer(ABC):
         self.formatting = formatting
         self.include_mtime = include_mtime
         self.include_size = include_size
+
+        self.payload_dispatcher = PayloadDispatcher()
+        self._register_payload_handlers()
+
+    def _register_payload_handlers(self) -> None:
+        """Override in subclasses to register handlers for each payload type."""
+        pass
 
     # ------------------------------------------------------------------
     # Common properties
@@ -106,9 +136,9 @@ class BaseSerializer(ABC):
     def write_files_open(self, mode: str, write: WriteFn) -> None:
         ...
 
-    @abstractmethod
     def write_file(self, entry: FileEntry, payload: FilePayload, write: WriteFn) -> None:
-        ...
+        """Default implementation delegates to the payload dispatcher."""
+        self.payload_dispatcher.dispatch(payload, entry, write)
 
     @abstractmethod
     def write_files_close(self, write: WriteFn) -> None:

@@ -1,3 +1,4 @@
+# src/repo2xml/domain/exceptions.py
 from __future__ import annotations
 
 
@@ -15,3 +16,7 @@ class OutputError(Repo2XMLError):
 
 class SerializationError(Repo2XMLError):
     """Serializer selection or output generation failure (fatal)."""
+
+
+class FacadeError(Repo2XMLError):
+    """Error during facade initialisation or wiring (fatal)."""

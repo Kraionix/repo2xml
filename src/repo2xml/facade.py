@@ -11,6 +11,7 @@ from repo2xml.application.filters import apply_file_filters
 from repo2xml.application.pipeline import ExportPipeline
 from repo2xml.application.progress import NullProgressReporter, ProgressReporter
 from repo2xml.config import Repo2XMLConfig
+from repo2xml.domain.exceptions import FacadeError, Repo2XMLError
 from repo2xml.domain.model import ExportStats, FileEntry
 from repo2xml.services.ingest.ingestor import StandardIngestor
 from repo2xml.services.scan.gitignore import GitignoreEngine
@@ -44,50 +45,56 @@ class Repo2XML:
         self.root_path = root_path.resolve()
         self.config = config
 
-        # Normalize/validate config early.
-        self.config.normalize()
-        self.config.validate()
+        try:
+            # Normalize/validate config early.
+            self.config.normalize()
+            self.config.validate()
 
-        # Automatic binary extension list from root .gitattributes (best-effort)
-        if config.binary_ext_fastpath:
-            self._enrich_binary_extensions_from_gitattributes()
+            # Automatic binary extension list from root .gitattributes (best-effort)
+            if config.binary_ext_fastpath:
+                self._enrich_binary_extensions_from_gitattributes()
 
-        # Defaults can be overridden for testing or custom integrations.
-        self._gitignore_engine: Optional[GitignoreEngine] = None
+            # Defaults can be overridden for testing or custom integrations.
+            self._gitignore_engine: Optional[GitignoreEngine] = None
 
-        if scanner is None:
-            self._gitignore_engine = GitignoreEngine(
-                root_path=self.root_path,
-                user_ignore=self.config.ignore_patterns,
-                user_include=self.config.include_patterns,
-            )
+            if scanner is None:
+                self._gitignore_engine = GitignoreEngine(
+                    root_path=self.root_path,
+                    user_ignore=self.config.ignore_patterns,
+                    user_include=self.config.include_patterns,
+                )
 
-            scanner = FileSystemScanner(
-                root=self.root_path,
-                gitignore_engine=self._gitignore_engine,
-                use_gitignore=self.config.use_gitignore,
-                follow_symlinks_dirs=self.config.follow_symlinks_dirs,
-                symlinks_files=self.config.symlinks_files.value,
-                hard_exclude_dirs=set(self.config.hard_exclude_dirs),
-            )
+                scanner = FileSystemScanner(
+                    root=self.root_path,
+                    gitignore_engine=self._gitignore_engine,
+                    use_gitignore=self.config.use_gitignore,
+                    follow_symlinks_dirs=self.config.follow_symlinks_dirs,
+                    symlinks_files=self.config.symlinks_files.value,
+                    hard_exclude_dirs=set(self.config.hard_exclude_dirs),
+                )
 
-        if ingestor is None:
-            ingestor = StandardIngestor(
-                newline_mode=self.config.newline.value,
-                decode_errors=self.config.decode_errors.value,
-                use_ext_fastpath=self.config.binary_ext_fastpath,
-                binary_ext_add=self.config.binary_ext_add,
-                binary_ext_remove=self.config.binary_ext_remove,
-            )
+            if ingestor is None:
+                ingestor = StandardIngestor(
+                    newline_mode=self.config.newline.value,
+                    decode_errors=self.config.decode_errors.value,
+                    use_ext_fastpath=self.config.binary_ext_fastpath,
+                    binary_ext_add=self.config.binary_ext_add,
+                    binary_ext_remove=self.config.binary_ext_remove,
+                )
 
-        if serializer is None:
-            serializer = create_serializer(
-                fmt=self.config.format,
-                formatting=self.config.formatting.value,
-                include_mtime=self.config.include_mtime,
-                include_size=self.config.include_size,
-                text_decode_errors=self.config.decode_errors.value,
-            )
+            if serializer is None:
+                serializer = create_serializer(
+                    fmt=self.config.format,
+                    formatting=self.config.formatting.value,
+                    include_mtime=self.config.include_mtime,
+                    include_size=self.config.include_size,
+                    text_decode_errors=self.config.decode_errors.value,
+                )
+
+        except Repo2XMLError:
+            raise
+        except Exception as exc:
+            raise FacadeError(f"Failed to initialise Repo2XML: {exc}") from exc
 
         self._scanner = scanner
         self._ingestor = ingestor
@@ -102,16 +109,13 @@ class Repo2XML:
         )
 
     def _enrich_binary_extensions_from_gitattributes(self) -> None:
-        """Parse root .gitattributes and add simple binary extension patterns."""
         ga_path = self.root_path / ".gitattributes"
         if not ga_path.exists():
             return
-
         try:
             lines = ga_path.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
             return
-
         added: set[str] = set()
         for raw_line in lines:
             line = raw_line.strip()
@@ -123,9 +127,8 @@ class Repo2XML:
             pattern, *attrs = tokens
             if "binary" not in attrs:
                 continue
-            # Only accept simple extension patterns like "*.ext"
             if pattern.startswith("*.") and "/" not in pattern:
-                ext = pattern[1:]  # e.g. ".dat"
+                ext = pattern[1:]
                 if ext not in self.config.binary_ext_add:
                     added.add(ext.lower())
         if added:
@@ -138,15 +141,9 @@ class Repo2XML:
             )
 
     def scan(self) -> Generator[FileEntry, None, None]:
-        """Yield file entries discovered in the repository (no content reads)."""
         yield from self._scanner.scan()
 
     def filtered_scan(self) -> List[FileEntry]:
-        """
-        Scan and apply file-level size/date filters, returning sorted entries.
-
-        Useful for dry‑run inspection and other pre‑serialisation overviews.
-        """
         entries = list(self._scanner.scan())
         entries = apply_file_filters(entries, self.config)
         entries.sort(key=lambda e: e.rel_path)
@@ -158,27 +155,15 @@ class Repo2XML:
         *,
         progress: Optional[ProgressReporter] = None,
     ) -> ExportStats:
-        """
-        Execute the full pipeline and write output bytes to output_stream.
-
-        Args:
-            output_stream: A writable binary stream (file, stdout, BytesIO).
-            progress: Optional ProgressReporter (supports total + finish).
-
-        Returns:
-            ExportStats with per-run summary.
-        """
         reporter = progress or NullProgressReporter()
         return self._pipeline.execute(output_stream=output_stream, progress=reporter)
 
     def export_to_bytes(self) -> bytes:
-        """Convenience helper for programmatic usage (bytes only)."""
         buf = io.BytesIO()
         self.export(buf)
         return buf.getvalue()
 
     def export_to_bytes_with_stats(self) -> tuple[bytes, ExportStats]:
-        """Convenience helper returning both bytes and stats."""
         buf = io.BytesIO()
         stats = self.export(buf)
         return buf.getvalue(), stats

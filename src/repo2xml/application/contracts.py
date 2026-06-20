@@ -1,3 +1,4 @@
+# src/repo2xml/application/contracts.py
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,7 +8,7 @@ from repo2xml.domain.model import FileEntry, SniffResult, TextReadResult
 
 
 class ScanStatsLike(Protocol):
-    """Minimal scanner stats contract (optional)."""
+    """Minimal scanner stats contract."""
 
     def has_issues(self) -> bool:
         ...

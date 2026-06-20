@@ -101,24 +101,23 @@ class ExportPipeline:
                 )
 
             scan_warn: Optional[str] = None
-            stats = getattr(self.scanner, "stats", None)
-            if stats is not None and getattr(stats, "has_issues", None) is not None and stats.has_issues():
-                scan_warn = stats.summary()
+            if self.scanner.stats is not None and self.scanner.stats.has_issues():
+                scan_warn = self.scanner.stats.summary()
                 logger.warning("Scan encountered filesystem errors (some entries skipped): %s", scan_warn)
-                # Push warning count to the progress bar if supported
-                if hasattr(progress, "set_warning_count"):
-                    total_warnings = sum(
-                        getattr(stats, attr, 0)
-                        for attr in (
-                            "dirs_scandir_errors",
-                            "entry_is_symlink_errors",
-                            "entry_is_dir_errors",
-                            "entry_is_file_errors",
-                            "entry_stat_errors",
-                            "entry_readlink_errors",
-                        )
+                # Push warning count to the progress bar.
+                # Count the known error fields.
+                total_warnings = sum(
+                    getattr(self.scanner.stats, attr, 0)
+                    for attr in (
+                        "dirs_scandir_errors",
+                        "entry_is_symlink_errors",
+                        "entry_is_dir_errors",
+                        "entry_is_file_errors",
+                        "entry_stat_errors",
+                        "entry_readlink_errors",
                     )
-                    progress.set_warning_count(total_warnings)
+                )
+                progress.set_warning_count(total_warnings)
 
             total = len(entries)
             logger.info("Found %d files.", total)
@@ -184,9 +183,8 @@ class ExportPipeline:
                 else:
                     emitted += 1
 
-                # Show current file name in the progress bar if possible
-                if hasattr(progress, "set_postfix"):
-                    progress.set_postfix(entry.name)
+                # Show current file name in the progress bar.
+                progress.set_postfix(entry.name)
 
                 progress.advance(1)
 

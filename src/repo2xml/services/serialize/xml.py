@@ -33,18 +33,10 @@ def _iso_utc_from_mtime_ns(mtime_ns: int) -> str:
     try:
         return datetime.fromtimestamp(mtime_ns / 1_000_000_000, tz=timezone.utc).isoformat()
     except (OverflowError, OSError):
-        # Unrepresentable timestamp; use a documented fallback that is still valid ISO-8601.
         return "0001-01-01T00:00:00+00:00"
 
 
 def _is_valid_xml_char(cp: int) -> bool:
-    """
-    XML 1.0 valid character ranges:
-      - #x9 | #xA | #xD
-      - #x20..#xD7FF
-      - #xE000..#xFFFD
-      - #x10000..#x10FFFF
-    """
     return (
         cp == 0x9
         or cp == 0xA
@@ -56,80 +48,40 @@ def _is_valid_xml_char(cp: int) -> bool:
 
 
 def _xml_sanitize_text(s: str) -> str:
-    """
-    Replace characters that are illegal in XML 1.0 with U+FFFD.
-
-    Also preemptively neutralises potential XXE vectors (&lt;!ENTITY, &lt;!DOCTYPE)
-    by replacing them with their escaped equivalents before standard XML escaping.
-    """
     if not s:
         return s
-
-    # Defang potential XXE injections even before the regular escaping pass.
     s = s.replace("&lt;!ENTITY", "&lt;!ENTITY")
     s = s.replace("&lt;!DOCTYPE", "&lt;!DOCTYPE")
-
     out: list[str] = []
-    changed = False
     for ch in s:
         cp = ord(ch)
         if _is_valid_xml_char(cp):
             out.append(ch)
         else:
             out.append("\uFFFD")
-            changed = True
-    return "".join(out) if changed else s
+    return "".join(out)
 
 
 def _esc_attr(s: str) -> str:
-    """Escape a string for safe use in XML attributes."""
     return html.escape(_xml_sanitize_text(s), quote=True)
 
 
 def _json_detail(detail: dict[str, object]) -> str:
-    """
-    Deterministic JSON serialization for detail dictionaries.
-
-    - sort_keys=True for stable output
-    - separators to avoid whitespace noise
-    - default=str to avoid crashes on unexpected objects
-    """
     return json.dumps(detail, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
 
 
-# CDATA markers are stored in base64 so this source code does not contain
-# the CDATA terminator literally (avoids self-rewriting when serializing this repo).
 _CDATA_OPEN = base64.b64decode("PCFbQ0RBVEFb").decode("ascii")
 _CDATA_CLOSE = base64.b64decode("XV0+").decode("ascii")
 _CDATA_SPLIT = base64.b64decode("XV1dXT48IVtDREFUQVs+").decode("ascii")
 
 
 def _cdata(text: str) -> str:
-    """
-    Wrap text in a CDATA section.
-
-    If the CDATA close marker appears in content, we split it using the standard
-    technique (replace close marker with a safe sequence that closes and reopens CDATA).
-    """
     text = _xml_sanitize_text(text)
     text = text.replace(_CDATA_CLOSE, _CDATA_SPLIT)
     return _CDATA_OPEN + text + _CDATA_CLOSE
 
 
 class XMLSerializer(BaseSerializer):
-    """
-    Streaming-friendly XML serializer.
-
-    formatting:
-      - "compact" (default): newlines, no indentation
-      - "pretty": newlines + TAB indentation
-      - "minify": no newlines, no indentation
-
-    All dynamically inserted values are aggressively sanitised against illegal XML
-    characters and potential XXE vectors. The serialiser never emits raw user data
-    outside of CDATA sections or escaped attribute values.
-    """
-
     def __init__(
         self,
         *,
@@ -141,12 +93,20 @@ class XMLSerializer(BaseSerializer):
         super().__init__(formatting=formatting, include_mtime=include_mtime, include_size=include_size)
         self.text_decode_errors = text_decode_errors
 
+    def _register_payload_handlers(self) -> None:
+        self.payload_dispatcher.register(MetadataPayload, self._write_metadata)
+        self.payload_dispatcher.register(LinkPayload, self._write_link)
+        self.payload_dispatcher.register(TextPayload, self._write_text)
+        self.payload_dispatcher.register(BinaryHashPayload, self._write_hash)
+        self.payload_dispatcher.register(BinaryBase64Payload, self._write_base64)
+        self.payload_dispatcher.register(SkippedPayload, self._write_skipped)
+        self.payload_dispatcher.register(ErrorPayload, self._write_error)
+
     def write_header(self, meta: ExportMeta, write: WriteFn) -> None:
         nl = self.nl
         i0 = self.indent(0)
         i1 = self.indent(1)
         i2 = self.indent(2)
-
         write(f'{i0}<?xml version="1.0" encoding="utf-8"?>{nl}')
         write(
             f'{i0}<repository_context version="{_esc_attr(meta.schema_version)}" '
@@ -154,40 +114,27 @@ class XMLSerializer(BaseSerializer):
         )
         write(f"{i1}<meta>{nl}")
         write(f"{i2}<root_path>{html.escape(_xml_sanitize_text(meta.root_path))}</root_path>{nl}")
-
         if meta.generated_at_utc is not None:
             write(
                 f"{i2}<generated_at_utc>"
                 f"{html.escape(_xml_sanitize_text(meta.generated_at_utc))}"
                 f"</generated_at_utc>{nl}"
             )
-
         write(f"{i1}</meta>{nl}")
 
     def write_footer(self, write: WriteFn) -> None:
         write(f"{self.indent(0)}</repository_context>{self.nl}")
 
     def write_structure(self, entries: Sequence[FileEntry], write: WriteFn) -> None:
-        """
-        Emit an XML directory tree based on file paths.
-
-        Implementation:
-        - Use a stack to open/close <dir> elements without building a full tree object.
-        - The pipeline already sorts entries by rel_path for determinism.
-          We avoid building a separate list of paths in the common case.
-        """
         nl = self.nl
         write(f"{self.indent(1)}<project_structure>{nl}")
-
         entries_view: Sequence[FileEntry] = entries
-        # Defensive fallback: sort if not already sorted.
         for i in range(len(entries) - 1):
             if entries[i].rel_path > entries[i + 1].rel_path:
                 entries_view = sorted(entries, key=lambda e: e.rel_path)
                 break
-
         stack: list[str] = []
-        base_level = 2  # children of <project_structure>
+        base_level = 2
 
         def close_to(depth: int) -> None:
             while len(stack) > depth:
@@ -199,14 +146,11 @@ class XMLSerializer(BaseSerializer):
             rel = entry.rel_path
             parts = rel.split("/")
             dir_parts, file_name = parts[:-1], parts[-1]
-
             common = 0
             max_common = min(len(stack), len(dir_parts))
             while common < max_common and stack[common] == dir_parts[common]:
                 common += 1
-
             close_to(common)
-
             for j in range(common, len(dir_parts)):
                 stack.append(dir_parts[j])
                 dir_path = "/".join(stack)
@@ -215,13 +159,11 @@ class XMLSerializer(BaseSerializer):
                     f'{self.indent(level)}<dir name="{_esc_attr(dir_parts[j])}" '
                     f'path="{_esc_attr(dir_path)}">{nl}'
                 )
-
             file_level = base_level + len(stack)
             write(
                 f'{self.indent(file_level)}<file name="{_esc_attr(file_name)}" '
                 f'path="{_esc_attr(rel)}" />{nl}'
             )
-
         close_to(0)
         write(f"{self.indent(1)}</project_structure>{nl}")
 
@@ -232,12 +174,6 @@ class XMLSerializer(BaseSerializer):
         write(f"{self.indent(1)}</files>{self.nl}")
 
     def _file_attr_str(self, entry: FileEntry, *, link_target_override: Optional[str] = None) -> str:
-        """
-        Build a compact attribute string for a <file> element.
-
-        link_target_override is used for LinkPayload in case the scan did not
-        capture a readlink target (platform/permission dependent).
-        """
         parts: list[str] = [
             f'path="{_esc_attr(entry.rel_path)}"',
             f'ext="{_esc_attr("".join(Path(entry.rel_path).suffixes))}"',
@@ -247,79 +183,79 @@ class XMLSerializer(BaseSerializer):
         if self.include_mtime:
             mtime_str = _iso_utc_from_mtime_ns(entry.mtime_ns)
             parts.append(f'mtime_utc="{_esc_attr(mtime_str)}"')
-
         if entry.is_symlink:
             parts.append('symlink="true"')
             target = entry.symlink_target or link_target_override
             if target:
                 parts.append(f'link_target="{_esc_attr(target)}"')
-
         return " ".join(parts)
 
     def _write_detail_if_any(self, detail: dict[str, object], *, indent_str: str, write: WriteFn) -> None:
         if not detail:
             return
-        # Machine-readable detail for downstream processing.
         write(f"{indent_str}<detail>{_cdata(_json_detail(detail))}</detail>{self.nl}")
 
-    def write_file(self, entry: FileEntry, payload: FilePayload, write: WriteFn) -> None:
+    # ---- Payload handlers ----
+
+    def _write_metadata(self, entry: FileEntry, payload: MetadataPayload, write: WriteFn) -> None:
+        attrs = self._file_attr_str(entry)
+        write(f'{self.indent(2)}<file {attrs} />{self.nl}')
+
+    def _write_link(self, entry: FileEntry, payload: LinkPayload, write: WriteFn) -> None:
+        attrs = self._file_attr_str(entry, link_target_override=payload.link_target)
+        write(f'{self.indent(2)}<file {attrs} link_only="true" />{self.nl}')
+
+    def _write_text(self, entry: FileEntry, payload: TextPayload, write: WriteFn) -> None:
         nl = self.nl
         i2 = self.indent(2)
         i3 = self.indent(3)
-
-        if isinstance(payload, MetadataPayload):
-            attrs = self._file_attr_str(entry)
-            write(f'{i2}<file {attrs} />{nl}')
-            return
-
-        if isinstance(payload, LinkPayload):
-            attrs = self._file_attr_str(entry, link_target_override=payload.link_target)
-            write(f'{i2}<file {attrs} link_only="true" />{nl}')
-            return
-
         attrs = self._file_attr_str(entry)
+        content_attrs: list[str] = []
+        if payload.encoding:
+            content_attrs.append(f' encoding="{_esc_attr(payload.encoding)}"')
+        if self.text_decode_errors:
+            content_attrs.append(f' decode_errors="{_esc_attr(self.text_decode_errors)}"')
+        write(f'{i2}<file {attrs}>{nl}')
+        write(f"{i3}<content{''.join(content_attrs)}>{_cdata(payload.text)}</content>{nl}")
+        write(f"{i2}</file>{nl}")
 
-        if isinstance(payload, TextPayload):
-            content_attrs: list[str] = []
-            if payload.encoding:
-                content_attrs.append(f' encoding="{_esc_attr(payload.encoding)}"')
-            if self.text_decode_errors:
-                content_attrs.append(f' decode_errors="{_esc_attr(self.text_decode_errors)}"')
+    def _write_hash(self, entry: FileEntry, payload: BinaryHashPayload, write: WriteFn) -> None:
+        nl = self.nl
+        i2 = self.indent(2)
+        i3 = self.indent(3)
+        attrs = self._file_attr_str(entry)
+        write(f'{i2}<file {attrs} binary="true">{nl}')
+        write(f'{i3}<content encoding="sha256">{html.escape(payload.sha256_hex)}</content>{nl}')
+        write(f"{i2}</file>{nl}")
 
-            write(f'{i2}<file {attrs}>{nl}')
-            write(f"{i3}<content{''.join(content_attrs)}>{_cdata(payload.text)}</content>{nl}")
-            write(f"{i2}</file>{nl}")
-            return
+    def _write_base64(self, entry: FileEntry, payload: BinaryBase64Payload, write: WriteFn) -> None:
+        nl = self.nl
+        i2 = self.indent(2)
+        i3 = self.indent(3)
+        attrs = self._file_attr_str(entry)
+        write(f'{i2}<file {attrs} binary="true">{nl}')
+        write(f'{i3}<content encoding="base64">')
+        for chunk in payload.chunks:
+            write(chunk)
+        write(f"</content>{nl}")
+        write(f"{i2}</file>{nl}")
 
-        if isinstance(payload, BinaryHashPayload):
-            write(f'{i2}<file {attrs} binary="true">{nl}')
-            write(f'{i3}<content encoding="sha256">{html.escape(payload.sha256_hex)}</content>{nl}')
-            write(f"{i2}</file>{nl}")
-            return
+    def _write_skipped(self, entry: FileEntry, payload: SkippedPayload, write: WriteFn) -> None:
+        nl = self.nl
+        i2 = self.indent(2)
+        i3 = self.indent(3)
+        attrs = self._file_attr_str(entry)
+        write(f'{i2}<file {attrs} skipped="true" skip_code="{_esc_attr(payload.code.value)}">{nl}')
+        write(f"{i3}<error>{html.escape(_xml_sanitize_text(payload.message))}</error>{nl}")
+        self._write_detail_if_any(payload.detail, indent_str=i3, write=write)
+        write(f"{i2}</file>{nl}")
 
-        if isinstance(payload, BinaryBase64Payload):
-            write(f'{i2}<file {attrs} binary="true">{nl}')
-            write(f'{i3}<content encoding="base64">')
-            for chunk in payload.chunks:
-                write(chunk)
-            write(f"</content>{nl}")
-            write(f"{i2}</file>{nl}")
-            return
-
-        if isinstance(payload, SkippedPayload):
-            write(f'{i2}<file {attrs} skipped="true" skip_code="{_esc_attr(payload.code.value)}">{nl}')
-            write(f"{i3}<error>{html.escape(_xml_sanitize_text(payload.message))}</error>{nl}")
-            self._write_detail_if_any(payload.detail, indent_str=i3, write=write)
-            write(f"{i2}</file>{nl}")
-            return
-
-        if isinstance(payload, ErrorPayload):
-            write(f'{i2}<file {attrs} skipped="true" error_code="{_esc_attr(payload.code.value)}">{nl}')
-            write(f"{i3}<error>{html.escape(_xml_sanitize_text(payload.message))}</error>{nl}")
-            self._write_detail_if_any(payload.detail, indent_str=i3, write=write)
-            write(f"{i2}</file>{nl}")
-            return
-
-        write(f'{i2}<file {attrs} skipped="true">{nl}')
-        write(f"{i3}<error>Unknown payload</error>{nl}")
+    def _write_error(self, entry: FileEntry, payload: ErrorPayload, write: WriteFn) -> None:
+        nl = self.nl
+        i2 = self.indent(2)
+        i3 = self.indent(3)
+        attrs = self._file_attr_str(entry)
+        write(f'{i2}<file {attrs} skipped="true" error_code="{_esc_attr(payload.code.value)}">{nl}')
+        write(f"{i3}<error>{html.escape(_xml_sanitize_text(payload.message))}</error>{nl}")
+        self._write_detail_if_any(payload.detail, indent_str=i3, write=write)
         write(f"{i2}</file>{nl}")
