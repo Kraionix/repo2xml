@@ -1,3 +1,4 @@
+# src/repo2xml/services/scan/scanner.py
 from __future__ import annotations
 
 import logging
@@ -7,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Generator, Optional, Set, Union
 
+from repo2xml.config import SymlinkFilesMode
 from repo2xml.domain.model import FileEntry
 from repo2xml.services.scan.gitignore import GitignoreEngine, IgnoreRuleset
 
@@ -99,14 +101,14 @@ class FileSystemScanner:
         gitignore_engine: GitignoreEngine,
         use_gitignore: bool = True,
         follow_symlinks_dirs: bool = False,
-        symlinks_files: str = "follow",  # follow|skip|as-link
+        symlinks_files: str = "follow",
         hard_exclude_dirs: Optional[Set[str]] = None,
     ):
         self.root = root.resolve()
         self.ge = gitignore_engine
         self.use_gitignore = use_gitignore
         self.follow_symlinks_dirs = follow_symlinks_dirs
-        self.symlinks_files = symlinks_files
+        self.symlinks_files = SymlinkFilesMode(symlinks_files)  # validate early, use Enum internally
         self.hard_exclude_dirs = set(hard_exclude_dirs or {".git"})
 
         # Cycle protection: track visited directories by (dev, ino) when available,
@@ -241,14 +243,14 @@ class FileSystemScanner:
                         continue
 
                     # Symlink file handling.
-                    if is_symlink and self.symlinks_files == "skip":
+                    if is_symlink and self.symlinks_files == SymlinkFilesMode.skip:
                         continue
 
                     # Special case: symlink file in "as-link" mode.
                     #
                     # Goal: do NOT touch the symlink target (no follow_symlinks=True checks).
                     # This also ensures broken symlinks are still included in output.
-                    if is_symlink and self.symlinks_files == "as-link":
+                    if is_symlink and self.symlinks_files == SymlinkFilesMode.as_link:
                         symlink_target: Optional[str] = None
                         try:
                             symlink_target = os.readlink(entry.path)

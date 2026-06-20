@@ -1,3 +1,4 @@
+# src/repo2xml/services/ingest/ingestor.py
 from __future__ import annotations
 
 import base64
@@ -10,6 +11,9 @@ from repo2xml.domain.model import ErrorCode, ErrorInfo, SkipCode, SkipInfo, Snif
 
 # Number of bytes used for binary/encoding heuristics.
 SNIFF_BYTES = 4096
+
+# Default chunk size for streaming hash / base64 operations.
+_DEFAULT_CHUNK_SIZE = 64 * 1024
 
 # BOM signatures (longest first). Used to detect UTF-8/16/32 text reliably.
 _BOMS: list[tuple[bytes, str]] = [
@@ -173,34 +177,6 @@ def _build_binary_ext_sets(
     return exts, comps
 
 
-def _is_likely_binary_by_extension(
-    path: Path,
-    *,
-    add: Optional[Sequence[str]] = None,
-    remove: Optional[Sequence[str]] = None,
-) -> bool:
-    """
-    Fast-path: classify obvious binary formats by filename extension.
-    Matching is case-insensitive.
-
-    Note: StandardIngestor uses a cached matcher for performance. This helper
-    remains for direct unit testing and standalone use.
-    """
-    suffixes = [s.lower() for s in path.suffixes]
-    if not suffixes:
-        return False
-
-    exts, comps = _build_binary_ext_sets(add=add, remove=remove)
-
-    # Compound suffix match (".tar.gz" etc).
-    if len(suffixes) >= 2:
-        comp = "".join(suffixes[-2:])
-        if comp in comps:
-            return True
-
-    return suffixes[-1] in exts
-
-
 @dataclass(slots=True, frozen=True)
 class BinaryExtensionMatcher:
     """Precomputed binary extension matcher (simple + compound suffixes)."""
@@ -244,8 +220,8 @@ class StandardIngestor:
     def __init__(
         self,
         *,
-        newline_mode: str,  # "preserve" | "lf"
-        decode_errors: str = "replace",  # "replace" | "strict"
+        newline_mode: str,
+        decode_errors: str = "replace",
         use_ext_fastpath: bool = True,
         binary_ext_add: Optional[Sequence[str]] = None,
         binary_ext_remove: Optional[Sequence[str]] = None,
@@ -253,15 +229,13 @@ class StandardIngestor:
         self.newline_mode = newline_mode
         self.decode_errors = decode_errors
         self.use_ext_fastpath = use_ext_fastpath
-        self.binary_ext_add = list(binary_ext_add) if binary_ext_add else []
-        self.binary_ext_remove = list(binary_ext_remove) if binary_ext_remove else []
 
         # Cache extension matcher once per ingestor instance.
         self._ext_matcher: Optional[BinaryExtensionMatcher] = None
         if self.use_ext_fastpath:
             self._ext_matcher = BinaryExtensionMatcher.create(
-                add=self.binary_ext_add,
-                remove=self.binary_ext_remove,
+                add=binary_ext_add,
+                remove=binary_ext_remove,
             )
 
     def sniff(self, path: Path) -> SniffResult:
@@ -347,7 +321,7 @@ class StandardIngestor:
         return TextReadResult(kind="text", text=text, encoding=enc)
 
     @staticmethod
-    def sha256_file(path: Path, *, chunk_size: int = 1024 * 64) -> str:
+    def sha256_file(path: Path, *, chunk_size: int = _DEFAULT_CHUNK_SIZE) -> str:
         """Compute SHA-256 hex digest for a file in a streaming fashion."""
         h = hashlib.sha256()
         with open(path, "rb") as f:
@@ -359,7 +333,7 @@ class StandardIngestor:
         return h.hexdigest()
 
     @staticmethod
-    def iter_base64_chunks(path: Path, *, chunk_size: int = 1024 * 64) -> Iterable[str]:
+    def iter_base64_chunks(path: Path, *, chunk_size: int = _DEFAULT_CHUNK_SIZE) -> Iterable[str]:
         """
         Yield base64 ASCII chunks for a file, streaming.
 

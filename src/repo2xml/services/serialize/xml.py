@@ -1,3 +1,4 @@
+# src/repo2xml/services/serialize/xml.py
 from __future__ import annotations
 
 import base64
@@ -23,8 +24,15 @@ from repo2xml.services.serialize.base import WriteFn
 
 
 def _iso_utc_from_mtime_ns(mtime_ns: int) -> str:
-    """Convert nanosecond mtime to ISO-8601 UTC timestamp."""
-    return datetime.fromtimestamp(mtime_ns / 1_000_000_000, tz=timezone.utc).isoformat()
+    """Convert nanosecond mtime to ISO-8601 UTC timestamp.
+
+    Returns a sentinel string for out-of-range values to avoid a pipeline crash.
+    """
+    try:
+        return datetime.fromtimestamp(mtime_ns / 1_000_000_000, tz=timezone.utc).isoformat()
+    except (OverflowError, OSError):
+        # Unrepresentable timestamp; use a documented fallback that is still valid ISO-8601.
+        return "0001-01-01T00:00:00+00:00"
 
 
 def _is_valid_xml_char(cp: int) -> bool:
@@ -240,18 +248,16 @@ class XMLSerializer:
         link_target_override is used for LinkPayload in case the scan did not
         capture a readlink target (platform/permission dependent).
         """
-        attrs: dict[str, str] = {
-            "path": entry.rel_path,
-            "ext": "".join(Path(entry.rel_path).suffixes),
-        }
-
+        # Build the attribute list directly, preserving a deterministic order.
+        parts: list[str] = [
+            f'path="{_esc_attr(entry.rel_path)}"',
+            f'ext="{_esc_attr("".join(Path(entry.rel_path).suffixes))}"',
+        ]
         if self.include_size:
-            attrs["size"] = str(entry.size)
-
+            parts.append(f'size="{entry.size}"')
         if self.include_mtime:
-            attrs["mtime_utc"] = _iso_utc_from_mtime_ns(entry.mtime_ns)
-
-        parts = [f'{k}="{_esc_attr(v)}"' for k, v in attrs.items()]
+            mtime_str = _iso_utc_from_mtime_ns(entry.mtime_ns)
+            parts.append(f'mtime_utc="{_esc_attr(mtime_str)}"')
 
         if entry.is_symlink:
             parts.append('symlink="true"')
