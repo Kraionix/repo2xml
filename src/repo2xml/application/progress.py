@@ -43,6 +43,12 @@ class NullProgressReporter:
     def set_phase(self, phase: str) -> None:
         return
 
+    def set_warning_count(self, count: int) -> None:
+        return
+
+    def set_postfix(self, text: str) -> None:
+        return
+
 
 @dataclass(slots=True)
 class CallbackProgressReporter:
@@ -74,8 +80,8 @@ class RichProgressReporter:
     """
     Rich-based progress reporter.
 
-    Supports indeterminate phases, phase switching, and optional detail.
-    Kept in the application layer so future presentation layers can reuse it.
+    Supports indeterminate phases, phase switching, optional detail,
+    warning counts and a per‑file postfix.
     """
 
     def __init__(self, *, desc: str = "repo2xml", unit: str = "file"):
@@ -86,8 +92,12 @@ class RichProgressReporter:
             BarColumn(),
             TextColumn("{task.percentage:>3.0f}%"),
             TimeRemainingColumn(),
+            TextColumn("{task.fields[warnings]}"),
+            TextColumn("{task.fields[current_file]}"),
         )
-        self.task_id = self.progress.add_task(desc, total=None)
+        self.task_id = self.progress.add_task(
+            desc, total=None, warnings="", current_file=""
+        )
         self.progress.start()
 
     def set_total(self, total: Optional[int]) -> None:
@@ -97,11 +107,17 @@ class RichProgressReporter:
         self.progress.update(self.task_id, advance=n)
 
     def set_description(self, desc: str) -> None:
-        # Not natively supported as a postfix; update the description instead.
         self.progress.update(self.task_id, description=desc)
 
     def set_phase(self, phase: str) -> None:
         self.progress.update(self.task_id, description=phase)
+
+    def set_warning_count(self, count: int) -> None:
+        text = f"[yellow]⚠ {count}[/]" if count > 0 else ""
+        self.progress.update(self.task_id, warnings=text)
+
+    def set_postfix(self, text: str) -> None:
+        self.progress.update(self.task_id, current_file=f"[dim]{text}[/]")
 
     def finish(self) -> None:
         self.progress.stop()

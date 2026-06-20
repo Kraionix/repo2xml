@@ -1,3 +1,4 @@
+# src/repo2xml/application/pipeline.py
 from __future__ import annotations
 
 import io
@@ -90,6 +91,20 @@ class ExportPipeline:
             if stats is not None and getattr(stats, "has_issues", None) is not None and stats.has_issues():
                 scan_warn = stats.summary()
                 logger.warning("Scan encountered filesystem errors (some entries skipped): %s", scan_warn)
+                # Push warning count to the progress bar if supported
+                if hasattr(progress, "set_warning_count"):
+                    total_warnings = sum(
+                        getattr(stats, attr, 0)
+                        for attr in (
+                            "dirs_scandir_errors",
+                            "entry_is_symlink_errors",
+                            "entry_is_dir_errors",
+                            "entry_is_file_errors",
+                            "entry_stat_errors",
+                            "entry_readlink_errors",
+                        )
+                    )
+                    progress.set_warning_count(total_warnings)
 
             total = len(entries)
             logger.info("Found %d files.", total)
@@ -154,6 +169,10 @@ class ExportPipeline:
                     skipped_by[k] = skipped_by.get(k, 0) + 1
                 else:
                     emitted += 1
+
+                # Show current file name in the progress bar if possible
+                if hasattr(progress, "set_postfix"):
+                    progress.set_postfix(entry.name)
 
                 progress.advance(1)
 

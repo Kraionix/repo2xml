@@ -1,6 +1,7 @@
 # src/repo2xml/cli/main.py
 from __future__ import annotations
 
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import List, Optional
@@ -39,9 +40,18 @@ app = typer.Typer(add_completion=False)
 def _print_breakdown(title: str, data: dict[str, int]) -> None:
     if not data:
         return
-    typer.echo(title)
+    from rich.console import Console
+    from rich.table import Table
+
+    console = Console()
+    table = Table(title=title, show_header=True, header_style="bold")
+    table.add_column("Code", style="dim")
+    table.add_column("Count", justify="right")
+
     for k, v in sorted(data.items(), key=lambda kv: (-kv[1], kv[0])):
-        typer.echo(f"  - {k}: {v}")
+        table.add_row(k, str(v))
+
+    console.print(table)
 
 
 def _select_target(
@@ -180,6 +190,12 @@ def main(
         "--validate-xml",
         help="Validate the generated XML document by parsing it after writing (only for file output).",
     ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        "-q",
+        help="Suppress all non‑error output. Implies --no-progress and --log-level error.",
+    ),
     # Filtering options
     gitignore: bool = typer.Option(
         True,
@@ -242,6 +258,11 @@ def main(
     if version:
         typer.echo(f"repo2xml {tool_version('repo2xml')}")
         raise typer.Exit(code=0)
+
+    # --quiet forces minimal output
+    if quiet:
+        progress = False
+        log_level = LogLevel.error
 
     # Mutually exclusive output modes.
     chosen = sum(1 for v in (stdout, clipboard, stats_only) if v)
@@ -340,9 +361,12 @@ def main(
 
     reporter = RichProgressReporter() if progress else NullProgressReporter()
 
+    start_time = time.time()
     try:
         with target.open() as out_stream:
             stats = engine.export(out_stream, progress=reporter)
+
+        elapsed = time.time() - start_time
 
         # User-facing summary
         if stats_only:
@@ -360,12 +384,13 @@ def main(
             stats.files_skipped,
             stats.files_errors,
         )
+        logger.info("Completed in %.2f seconds", elapsed)
         if stats.scan_warning_summary:
             logger.warning("Scan warnings: %s", stats.scan_warning_summary)
 
         if report:
-            _print_breakdown("Skipped by cause:", stats.skipped_by_code)
-            _print_breakdown("Errors by cause:", stats.errors_by_code)
+            _print_breakdown("Skipped by cause", stats.skipped_by_code)
+            _print_breakdown("Errors by cause", stats.errors_by_code)
 
         # Optional XML validation for file output
         if validate_xml:
