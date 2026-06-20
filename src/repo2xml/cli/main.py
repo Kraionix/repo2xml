@@ -252,6 +252,22 @@ def main(
     logger = setup_logging(log_level)
     root = path.resolve()
 
+    # Validate --validate-xml compatibility:
+    # - Requires file output (not stdout/clipboard/stats-only).
+    # - Cannot be used with compression (the on-disk file would be binary).
+    if validate_xml:
+        if stdout or clipboard or stats_only:
+            logger.warning(
+                "--validate-xml is only supported with file output. Skipping validation."
+            )
+            validate_xml = False
+        elif compress != CompressMode.none:
+            logger.error(
+                "--validate-xml cannot be used with --compress. "
+                "Either disable compression or omit --validate-xml."
+            )
+            raise typer.Exit(code=2)
+
     # Determine absolute output path for exclusion logic (file target only).
     out_abs = output.resolve() if output.is_absolute() else (Path.cwd() / output).resolve()
 
@@ -352,8 +368,8 @@ def main(
             _print_breakdown("Errors by cause:", stats.errors_by_code)
 
         # Optional XML validation for file output
-        if validate_xml and isinstance(target, FileTarget):
-            xml_path = target.path
+        if validate_xml:
+            xml_path = out_abs  # guaranteed file target without compression
             try:
                 ET.parse(xml_path)
                 logger.info("XML validation passed: %s", xml_path)
