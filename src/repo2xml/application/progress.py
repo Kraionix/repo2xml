@@ -81,22 +81,61 @@ class RichProgressReporter:
     """
     Rich-based progress reporter with throttled updates.
 
-    Supports indeterminate phases, phase switching, optional detail,
-    warning counts and a per‑file postfix.
+    Supports two distinct visual modes:
+    - Indeterminate (total=None): spinner with description and optional warnings.
+    - Determinate (total>0): bar, percentage, time remaining, current file, warnings.
 
-    Updates are throttled to ~20 Hz (min interval 0.05 s) to avoid
-    overwhelming the terminal with thousands of refresh calls per second
-    when processing many small files.
-
-    If `no_color` is True, the underlying Rich Console uses plain text output.
+    Updates in determinate mode are throttled to ~20 Hz (min interval 0.05 s)
+    to avoid terminal congestion.
     """
 
     def __init__(self, *, desc: str = "repo2xml", unit: str = "file", no_color: bool = False):
         from rich.console import Console
-        from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 
         self.console = Console(no_color=no_color)
-        self.progress = Progress(
+        self.desc = desc
+        self.unit = unit
+
+        self._active_progress = None
+        self._active_task_id = None
+        self._total: Optional[int] = None
+
+        # Throttling state (shared across phases)
+        self._pending_advances = 0
+        self._last_flush_time = 0.0
+        self._min_interval = 0.05  # seconds
+
+        self._displayed_postfix = ""
+        self._pending_postfix: Optional[str] = None
+        self._displayed_warnings = ""
+        self._pending_warnings: Optional[str] = None
+
+    # ------------------------------------------------------------------
+    # Internal helpers for starting the appropriate progress bar
+    # ------------------------------------------------------------------
+
+    def _start_indefinite(self) -> None:
+        if self._active_progress is not None:
+            self._active_progress.stop()
+        from rich.progress import Progress, SpinnerColumn, TextColumn
+
+        self._active_progress = Progress(
+            SpinnerColumn(),
+            TextColumn("{task.description}"),
+            TextColumn("{task.fields[warnings]}", style="yellow"),
+            console=self.console,
+        )
+        self._active_task_id = self._active_progress.add_task(
+            self.desc, total=None, warnings=""
+        )
+        self._active_progress.start()
+
+    def _start_definite(self, total: int) -> None:
+        if self._active_progress is not None:
+            self._active_progress.stop()
+        from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
+
+        self._active_progress = Progress(
             TextColumn("{task.description}"),
             BarColumn(),
             TextColumn("{task.percentage:>3.0f}%"),
@@ -105,45 +144,47 @@ class RichProgressReporter:
             TextColumn("{task.fields[current_file]}", style="dim"),
             console=self.console,
         )
-        self.task_id = self.progress.add_task(
-            desc, total=None, warnings="", current_file=""
+        self._active_task_id = self._active_progress.add_task(
+            self.desc, total=total, warnings="", current_file=""
         )
-        self.progress.start()
-
-        # Throttling state
-        self._pending_advances = 0
-        self._last_flush_time = 0.0
-        self._min_interval = 0.05  # seconds
-
-        # Cached field values to avoid redundant updates
-        self._displayed_postfix = ""
-        self._pending_postfix: Optional[str] = None
-        self._displayed_warnings = ""
-        self._pending_warnings: Optional[str] = None
+        self._active_progress.start()
 
     # ------------------------------------------------------------------
     # Public protocol methods
     # ------------------------------------------------------------------
 
     def set_total(self, total: Optional[int]) -> None:
-        self.progress.update(self.task_id, total=total)
-        # Reset throttling when the phase changes
+        if total is None:
+            if self._active_progress is None or self._total is not None:
+                self._start_indefinite()
+        else:
+            if self._active_progress is None or self._total is None:
+                self._start_definite(total)
+            else:
+                # Already in determinate mode, just update the total.
+                self._active_progress.update(self._active_task_id, total=total)
+        self._total = total
         self._pending_advances = 0
         self._last_flush_time = time.time()
 
     def advance(self, n: int = 1) -> None:
-        # Skip updates in indeterminate mode (total is None)
-        if self.progress.tasks[self.task_id].total is None:
+        if self._active_progress is None:
             return
-
+        if self._total is None:
+            # In indeterminate mode we only keep the spinner alive by
+            # refreshing the display on each call (no progress concept).
+            self._active_progress.update(self._active_task_id)
+            return
         self._pending_advances += n
         self._flush_if_needed()
 
     def set_description(self, desc: str) -> None:
-        self.progress.update(self.task_id, description=desc)
+        self.desc = desc
+        if self._active_progress is not None:
+            self._active_progress.update(self._active_task_id, description=desc)
 
     def set_phase(self, phase: str) -> None:
-        self.progress.update(self.task_id, description=phase)
+        self.set_description(phase)
 
     def set_warning_count(self, count: int) -> None:
         text = f"⚠ {count}" if count > 0 else ""
@@ -156,7 +197,9 @@ class RichProgressReporter:
 
     def finish(self) -> None:
         self._flush(force=True)
-        self.progress.stop()
+        if self._active_progress is not None:
+            self._active_progress.stop()
+            self._active_progress = None
 
     # ------------------------------------------------------------------
     # Internal throttling logic
@@ -168,27 +211,23 @@ class RichProgressReporter:
             self._flush(now=now)
 
     def _flush(self, *, force: bool = False, now: Optional[float] = None) -> None:
+        if self._active_progress is None:
+            return
         if now is None:
             now = time.time()
-
-        # Nothing to update
         if not force and self._pending_advances == 0 and self._pending_postfix is None and self._pending_warnings is None:
             return
-
         kwargs: dict = {}
         if self._pending_advances:
             kwargs["advance"] = self._pending_advances
             self._pending_advances = 0
-
         if self._pending_postfix is not None:
             kwargs["current_file"] = self._pending_postfix
             self._displayed_postfix = self._pending_postfix
             self._pending_postfix = None
-
         if self._pending_warnings is not None:
             kwargs["warnings"] = self._pending_warnings
             self._displayed_warnings = self._pending_warnings
             self._pending_warnings = None
-
-        self.progress.update(self.task_id, **kwargs)
+        self._active_progress.update(self._active_task_id, **kwargs)
         self._last_flush_time = now
