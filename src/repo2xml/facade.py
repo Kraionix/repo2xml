@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import BinaryIO, Generator, List, Optional
 
-from repo2xml.application.contracts import IngestorLike, ScannerLike
+from repo2xml.application.contracts import IngestorLike, ScannerLike, IgnoreProvider
 from repo2xml.application.filters import apply_file_filters
 from repo2xml.application.pipeline import ExportPipeline
 from repo2xml.application.progress import NullProgressReporter, ProgressReporter
@@ -55,7 +55,7 @@ class Repo2XML:
                 self._enrich_binary_extensions_from_gitattributes()
 
             # Defaults can be overridden for testing or custom integrations.
-            self._gitignore_engine: Optional[GitignoreEngine] = None
+            self._gitignore_engine: Optional[IgnoreProvider] = None
 
             if scanner is None:
                 self._gitignore_engine = GitignoreEngine(
@@ -65,8 +65,8 @@ class Repo2XML:
                 )
 
                 scanner = FileSystemScanner(
-                    root=self.root_path,
-                    gitignore_engine=self._gitignore_engine,
+                    root=self.root_path,              
+                    ignore_provider=self._gitignore_engine,
                     use_gitignore=self.config.use_gitignore,
                     follow_symlinks_dirs=self.config.follow_symlinks_dirs,
                     symlinks_files=self.config.symlinks_files.value,

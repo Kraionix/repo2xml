@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Generator, Iterable, Optional, Protocol
+from typing import Generator, Iterable, Optional, Protocol, Sequence
 
 from repo2xml.domain.model import FileEntry, SniffResult, TextReadResult
+from repo2xml.services.scan.gitignore import IgnoreRuleset
 
 
 class ScanStatsLike(Protocol):
@@ -39,4 +40,17 @@ class IngestorLike(Protocol):
         ...
 
     def iter_base64_chunks(self, path: Path, *, chunk_size: int = 1024 * 64) -> Iterable[str]:
+        ...
+
+
+class IgnoreProvider(Protocol):
+    """Minimal ignore provider contract for filesystem scanning."""
+
+    def base_ruleset(self) -> IgnoreRuleset:
+        ...
+
+    def load_dir_ruleset(self, *, dir_abs: Path, dir_rel_posix: str) -> Optional[IgnoreRuleset]:
+        ...
+
+    def is_ignored(self, *, rel_path_posix: str, is_dir: bool, stack: Sequence[IgnoreRuleset]) -> bool:
         ...

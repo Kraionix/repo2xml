@@ -6,11 +6,12 @@ import os
 import stat
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generator, Optional, Set, Union
+from typing import Generator, Optional, Set, Union, Sequence
 
+from repo2xml.application.contracts import IgnoreProvider
 from repo2xml.config import SymlinkFilesMode
 from repo2xml.domain.model import FileEntry
-from repo2xml.services.scan.gitignore import GitignoreEngine, IgnoreRuleset
+from repo2xml.services.scan.gitignore import IgnoreRuleset
 
 logger = logging.getLogger("repo2xml.scanner")
 
@@ -98,14 +99,14 @@ class FileSystemScanner:
         self,
         *,
         root: Path,
-        gitignore_engine: GitignoreEngine,
+        ignore_provider: IgnoreProvider,
         use_gitignore: bool = True,
         follow_symlinks_dirs: bool = False,
         symlinks_files: str = "follow",
         hard_exclude_dirs: Optional[Set[str]] = None,
     ):
         self.root = root.resolve()
-        self.ge = gitignore_engine
+        self.ignore_provider = ignore_provider
         self.use_gitignore = use_gitignore
         self.follow_symlinks_dirs = follow_symlinks_dirs
         self.symlinks_files = SymlinkFilesMode(symlinks_files)  # validate early, use Enum internally
@@ -151,7 +152,7 @@ class FileSystemScanner:
         self.stats = ScanStats()
 
         # Ignore stack: root-scoped base patterns (ALWAYS_IGNORE + user overrides).
-        ignore_stack: list[IgnoreRuleset] = [self.ge.base_ruleset()]
+        ignore_stack: list[IgnoreRuleset] = [self.ignore_provider.base_ruleset()]
 
         # Mark root as visited to avoid pathological loops.
         self._visited_dir_keys.add(self._dir_key(self.root))
@@ -174,7 +175,7 @@ class FileSystemScanner:
             # Push local .gitignore rules (if enabled and present).
             pushed = False
             if self.use_gitignore:
-                rs = self.ge.load_dir_ruleset(dir_abs=dir_abs, dir_rel_posix=dir_rel)
+                rs = self.ignore_provider.load_dir_ruleset(dir_abs=dir_abs, dir_rel_posix=dir_rel)
                 if rs is not None:
                     ignore_stack.append(rs)
                     pushed = True
@@ -220,7 +221,7 @@ class FileSystemScanner:
                         is_dir = False
 
                     # Git-compatible ignore check (scoped).
-                    if self.ge.is_ignored(rel_path_posix=rel, is_dir=is_dir, stack=ignore_stack):
+                    if self.ignore_provider.is_ignored(rel_path_posix=rel, is_dir=is_dir, stack=ignore_stack):
                         continue
 
                     if is_dir:
