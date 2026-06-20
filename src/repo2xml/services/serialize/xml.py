@@ -5,6 +5,7 @@ import base64
 import html
 import json
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -23,6 +24,7 @@ from repo2xml.domain.model import (
 from repo2xml.services.serialize.base import WriteFn
 
 
+@lru_cache(maxsize=1024)
 def _iso_utc_from_mtime_ns(mtime_ns: int) -> str:
     """Convert nanosecond mtime to ISO-8601 UTC timestamp.
 

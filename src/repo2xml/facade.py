@@ -1,3 +1,4 @@
+# src/repo2xml/facade.py
 from __future__ import annotations
 
 import io
@@ -45,6 +46,10 @@ class Repo2XML:
         # Normalize/validate config early.
         self.config.normalize()
         self.config.validate()
+
+        # Automatic binary extension list from root .gitattributes (best-effort)
+        if config.binary_ext_fastpath:
+            self._enrich_binary_extensions_from_gitattributes()
 
         # Defaults can be overridden for testing or custom integrations.
         self._gitignore_engine: Optional[GitignoreEngine] = None
@@ -94,6 +99,42 @@ class Repo2XML:
             ingestor=self._ingestor,
             serializer=self._serializer,
         )
+
+    def _enrich_binary_extensions_from_gitattributes(self) -> None:
+        """Parse root .gitattributes and add simple binary extension patterns."""
+        ga_path = self.root_path / ".gitattributes"
+        if not ga_path.exists():
+            return
+
+        try:
+            lines = ga_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return
+
+        added: set[str] = set()
+        for raw_line in lines:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            tokens = line.split()
+            if len(tokens) < 2:
+                continue
+            pattern, *attrs = tokens
+            if "binary" not in attrs:
+                continue
+            # Only accept simple extension patterns like "*.ext"
+            if pattern.startswith("*.") and "/" not in pattern:
+                ext = pattern[1:]  # e.g. ".dat"
+                if ext not in self.config.binary_ext_add:
+                    added.add(ext.lower())
+        if added:
+            self.config.binary_ext_add.extend(sorted(added))
+            logger.info(
+                "Added %d binary extensions from %s: %s",
+                len(added),
+                ga_path,
+                ", ".join(sorted(added)),
+            )
 
     def scan(self) -> Generator[FileEntry, None, None]:
         """Yield file entries discovered in the repository (no content reads)."""

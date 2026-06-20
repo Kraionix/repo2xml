@@ -1,8 +1,9 @@
+# src/repo2xml/config.py
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, List
+from typing import Callable, List, Optional
 
 from repo2xml.domain.exceptions import ConfigurationError
 
@@ -137,6 +138,14 @@ class Repo2XMLConfig:
     # Processors are applied in order to ingested text content.
     text_processors: List[TextProcessor] = field(default_factory=list)
 
+    # File-level size filters (0 means no limit). Applied before any content inspection.
+    min_file_size: int = 0
+    max_file_size: int = 0
+
+    # File-level mtime filters (UTC epoch seconds, None means disabled).
+    newer_than: Optional[float] = None
+    older_than: Optional[float] = None
+
     def normalize(self) -> None:
         """
         Normalize configuration fields in-place.
@@ -168,6 +177,12 @@ class Repo2XMLConfig:
             raise ConfigurationError("max_hash_size must be >= 0")
         if self.write_buffer_chars < 0:
             raise ConfigurationError("write_buffer_chars must be >= 0")
+        if self.min_file_size < 0:
+            raise ConfigurationError("min_file_size must be >= 0")
+        if self.max_file_size < 0:
+            raise ConfigurationError("max_file_size must be >= 0")
+        if self.min_file_size > 0 and self.max_file_size > 0 and self.min_file_size > self.max_file_size:
+            raise ConfigurationError("min_file_size must be <= max_file_size")
 
         if not self.format:
             raise ConfigurationError("format must not be empty")

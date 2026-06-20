@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import time
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -69,6 +70,18 @@ def _select_target(
     if stdout:
         return StdoutTarget(compress=compress)
     return FileTarget(output_path, compress=compress)
+
+
+def _parse_datetime_arg(value: str) -> float:
+    """Parse an ISO‑8601 date/time string into UTC epoch seconds."""
+    try:
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            # Assume UTC if no timezone is given
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except (ValueError, OverflowError) as e:
+        raise typer.BadParameter(f"Invalid date/time: {e}")
 
 
 @app.callback(invoke_without_command=True)
@@ -196,6 +209,29 @@ def main(
         "-q",
         help="Suppress all non‑error output. Implies --no-progress and --log-level error.",
     ),
+    # --- File-level size & date filters ---
+    size_min: int = typer.Option(
+        0,
+        "--size-min",
+        help="Ignore files smaller than this size (bytes). 0 = no limit.",
+        min=0,
+    ),
+    size_max: int = typer.Option(
+        0,
+        "--size-max",
+        help="Ignore files larger than this size (bytes). 0 = no limit.",
+        min=0,
+    ),
+    newer_than: Optional[str] = typer.Option(
+        None,
+        "--newer-than",
+        help="Ignore files modified before this date (ISO‑8601). Example: 2025-01-01T00:00:00Z",
+    ),
+    older_than: Optional[str] = typer.Option(
+        None,
+        "--older-than",
+        help="Ignore files modified after this date (ISO‑8601).",
+    ),
     # Filtering options
     gitignore: bool = typer.Option(
         True,
@@ -302,6 +338,14 @@ def main(
         if rel_out is not None:
             user_ignore.append("/" + rel_out)
 
+    # Parse date filters
+    newer_ts: Optional[float] = None
+    if newer_than:
+        newer_ts = _parse_datetime_arg(newer_than)
+    older_ts: Optional[float] = None
+    if older_than:
+        older_ts = _parse_datetime_arg(older_than)
+
     processors = []
     if redact:
         processors.append(redact_secrets)
@@ -333,6 +377,10 @@ def main(
             max_hash_size=0,
             report=report,
             text_processors=processors,
+            min_file_size=size_min,
+            max_file_size=size_max,
+            newer_than=newer_ts,
+            older_than=older_ts,
         )
 
         engine = Repo2XML(root, config)

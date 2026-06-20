@@ -33,7 +33,8 @@ class ExportPipeline:
 
     Phases:
       1) Scan: collect FileEntry list (needed for structure + deterministic order)
-      2) Serialize:
+      2) Filter: apply file-level size/date constraints
+      3) Serialize:
          - header/meta
          - project_structure (if supported)
          - files (optional)
@@ -82,12 +83,33 @@ class ExportPipeline:
             entries: List[FileEntry] = []
             for entry in self.scanner.scan():
                 entries.append(entry)
-                # advance() in the throttled reporter is a no‑op during
-                # indeterminate mode, so we can safely call it without
-                # wasting CPU cycles.
                 progress.advance(1)
 
             entries.sort(key=lambda e: e.rel_path)
+
+            # ------------------------------------------------------------------
+            # File-level size & date filtering (post-scan, pre-serialize)
+            # ------------------------------------------------------------------
+            if (
+                self.config.min_file_size > 0
+                or self.config.max_file_size > 0
+                or self.config.newer_than is not None
+                or self.config.older_than is not None
+            ):
+                original_count = len(entries)
+                entries = [
+                    e
+                    for e in entries
+                    if (self.config.min_file_size == 0 or e.size >= self.config.min_file_size)
+                    and (self.config.max_file_size == 0 or e.size <= self.config.max_file_size)
+                    and (self.config.newer_than is None or (e.mtime_ns / 1e9) >= self.config.newer_than)
+                    and (self.config.older_than is None or (e.mtime_ns / 1e9) <= self.config.older_than)
+                ]
+                logger.info(
+                    "File-level filters removed %d entries (%d remaining).",
+                    original_count - len(entries),
+                    len(entries),
+                )
 
             scan_warn: Optional[str] = None
             stats = getattr(self.scanner, "stats", None)
