@@ -82,6 +82,9 @@ class ExportPipeline:
             entries: List[FileEntry] = []
             for entry in self.scanner.scan():
                 entries.append(entry)
+                # advance() in the throttled reporter is a no‑op during
+                # indeterminate mode, so we can safely call it without
+                # wasting CPU cycles.
                 progress.advance(1)
 
             entries.sort(key=lambda e: e.rel_path)
