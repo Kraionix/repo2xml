@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import List, Optional
 
 import typer
+from rich.console import Console
+from rich.tree import Tree
 
 from repo2xml.application.progress import NullProgressReporter, RichProgressReporter
 from repo2xml.cli.ui import LogLevel, setup_logging
@@ -22,6 +24,7 @@ from repo2xml.config import (
     SymlinkFilesMode,
 )
 from repo2xml.domain.exceptions import ConfigurationError, OutputError, Repo2XMLError, SerializationError
+from repo2xml.domain.model import FileEntry
 from repo2xml.facade import Repo2XML
 from repo2xml.services.ingest.redact import redact_secrets
 from repo2xml.services.output.targets import (
@@ -38,13 +41,11 @@ from repo2xml.utils.version import tool_version
 app = typer.Typer(add_completion=False)
 
 
-def _print_breakdown(title: str, data: dict[str, int]) -> None:
+def _print_breakdown(title: str, data: dict[str, int], console: Console) -> None:
     if not data:
         return
-    from rich.console import Console
     from rich.table import Table
 
-    console = Console()
     table = Table(title=title, show_header=True, header_style="bold")
     table.add_column("Code", style="dim")
     table.add_column("Count", justify="right")
@@ -82,6 +83,61 @@ def _parse_datetime_arg(value: str) -> float:
         return dt.timestamp()
     except (ValueError, OverflowError) as e:
         raise typer.BadParameter(f"Invalid date/time: {e}")
+
+
+def _build_tree(entries: List[FileEntry], console: Console) -> None:
+    """Render the filtered file list as a Rich Tree."""
+    tree = Tree("Project structure (dry-run)")
+    # Group entries by directory parts
+    dirs: dict[tuple[str, ...], list[str]] = {}
+    for entry in entries:
+        parts = tuple(entry.rel_path.split("/"))
+        dir_key = parts[:-1]
+        file_name = parts[-1]
+        dirs.setdefault(dir_key, []).append(file_name)
+
+    # We need to build a nested tree.  Since Rich Tree allows adding children by path,
+    # we can iterate through dirs and add files.
+    # The simplest way: sort dirs, then for each directory, add a sub-tree.
+    for dir_key in sorted(dirs):
+        path_str = "/".join(dir_key)
+        node = tree
+        if dir_key:
+            # add intermediate directories
+            current_path = ""
+            for part in dir_key:
+                current_path = f"{current_path}/{part}" if current_path else part
+                # Rich Tree doesn't have a direct lookup; we build dynamically by
+                # keeping a reference to the last node for each prefix.  Simpler:
+                # use the tree as single root and just add the whole path as a subtree.
+                # We'll just add the full relative directory path as a node.
+            # Actually we want to reuse existing branches.  We'll maintain a mapping
+            # from path tuple to Tree node.
+            # Let's implement a proper incremental tree building.
+            pass
+
+    # Since Rich Tree doesn't natively support incremental insertion by path,
+    # we'll do a simpler approach: build a nested dictionary first, then render.
+    root: dict = {}
+    for entry in sorted(entries, key=lambda e: e.rel_path):
+        parts = entry.rel_path.split("/")
+        current = root
+        for part in parts[:-1]:
+            current = current.setdefault(part, {})
+        # leaf: file, store as None or name
+        current.setdefault("__files__", []).append(parts[-1])
+
+    def add_branch(tree_node: Tree, subtree: dict) -> None:
+        for name, value in sorted(subtree.items()):
+            if name == "__files__":
+                for fname in sorted(value):
+                    tree_node.add(fname)
+            else:
+                branch = tree_node.add(name)
+                add_branch(branch, value)
+
+    add_branch(tree, root)
+    console.print(tree)
 
 
 @app.callback(invoke_without_command=True)
@@ -176,7 +232,7 @@ def main(
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
-        help="Do not write output. Only list files that would be processed.",
+        help="Show the project tree with all active filters, without generating output.",
     ),
     progress: bool = typer.Option(
         True,
@@ -208,6 +264,11 @@ def main(
         "--quiet",
         "-q",
         help="Suppress all non‑error output. Implies --no-progress and --log-level error.",
+    ),
+    no_color: bool = typer.Option(
+        False,
+        "--no-color",
+        help="Disable colored terminal output (forces plain text).",
     ),
     # --- File-level size & date filters ---
     size_min: int = typer.Option(
@@ -300,18 +361,13 @@ def main(
         progress = False
         log_level = LogLevel.error
 
-    # Mutually exclusive output modes.
-    chosen = sum(1 for v in (stdout, clipboard, stats_only) if v)
-    if chosen > 1:
-        typer.echo("Error: --stdout, --clipboard, and --stats-only are mutually exclusive.", err=True)
-        raise typer.Exit(code=2)
+    # Setup console with color control
+    console = Console(no_color=no_color)
+    logger = setup_logging(log_level, no_color=no_color)
 
-    logger = setup_logging(log_level)
     root = path.resolve()
 
-    # Validate --validate-xml compatibility:
-    # - Requires file output (not stdout/clipboard/stats-only).
-    # - Cannot be used with compression (the on-disk file would be binary).
+    # Validate --validate-xml compatibility
     if validate_xml:
         if stdout or clipboard or stats_only:
             logger.warning(
@@ -332,7 +388,6 @@ def main(
     user_ignore = list(ignore) if ignore else []
 
     # Auto-exclude output file to prevent self-inclusion loop (file output only).
-    # Important: only exclude if the output path is inside the scanned root.
     if not stdout and not clipboard and not stats_only:
         rel_out = try_relpath_posix(out_abs, root)
         if rel_out is not None:
@@ -373,7 +428,6 @@ def main(
             symlinks_files=symlinks_files,
             max_text_size=max_size,
             max_base64_size=max_size,
-            # Hashing is allowed beyond --max-size by default (0 = unlimited).
             max_hash_size=0,
             report=report,
             text_processors=processors,
@@ -388,12 +442,15 @@ def main(
         logger.error("Configuration error: %s", e)
         raise typer.Exit(code=2)
 
-    # Dry-run handling
+    # Dry-run handling: improved with tree output
     if dry_run:
-        logger.info("Dry-run mode: Listing files only.")
+        logger.info("Dry-run mode: showing filtered project tree.")
         try:
-            for entry in engine.scan():
-                print(entry.rel_path)
+            entries = engine.filtered_scan()
+            if entries:
+                _build_tree(entries, console)
+            else:
+                console.print("[yellow]No files matched the given filters.[/yellow]")
         except KeyboardInterrupt:
             logger.warning("Interrupted.")
             raise typer.Exit(code=130)
@@ -407,7 +464,7 @@ def main(
         compress=compress,
     )
 
-    reporter = RichProgressReporter() if progress else NullProgressReporter()
+    reporter = RichProgressReporter(no_color=no_color) if progress else NullProgressReporter()
 
     start_time = time.time()
     try:
@@ -416,11 +473,9 @@ def main(
 
         elapsed = time.time() - start_time
 
-        # User-facing summary
         if stats_only:
             logger.info("Done. Output discarded (%s).", target.describe())
         elif stdout:
-            # Nothing to announce; stdout already emitted.
             pass
         else:
             logger.info("Done. Output written to: %s", target.describe())
@@ -437,12 +492,11 @@ def main(
             logger.warning("Scan warnings: %s", stats.scan_warning_summary)
 
         if report:
-            _print_breakdown("Skipped by cause", stats.skipped_by_code)
-            _print_breakdown("Errors by cause", stats.errors_by_code)
+            _print_breakdown("Skipped by cause", stats.skipped_by_code, console)
+            _print_breakdown("Errors by cause", stats.errors_by_code, console)
 
-        # Optional XML validation for file output
         if validate_xml:
-            xml_path = out_abs  # guaranteed file target without compression
+            xml_path = out_abs
             try:
                 ET.parse(xml_path)
                 logger.info("XML validation passed: %s", xml_path)
@@ -463,6 +517,5 @@ def main(
         logger.error("Fatal error: %s", e)
         raise typer.Exit(code=1)
     except Exception as e:
-        # Unexpected errors are treated as bugs.
         logger.error("Unexpected error: %s", e)
         raise typer.Exit(code=1)

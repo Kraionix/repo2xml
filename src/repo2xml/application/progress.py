@@ -87,11 +87,15 @@ class RichProgressReporter:
     Updates are throttled to ~20 Hz (min interval 0.05 s) to avoid
     overwhelming the terminal with thousands of refresh calls per second
     when processing many small files.
+
+    If `no_color` is True, the underlying Rich Console uses plain text output.
     """
 
-    def __init__(self, *, desc: str = "repo2xml", unit: str = "file"):
+    def __init__(self, *, desc: str = "repo2xml", unit: str = "file", no_color: bool = False):
+        from rich.console import Console
         from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 
+        self.console = Console(no_color=no_color)
         self.progress = Progress(
             TextColumn("{task.description}"),
             BarColumn(),
@@ -99,6 +103,7 @@ class RichProgressReporter:
             TimeRemainingColumn(),
             TextColumn("{task.fields[warnings]}", style="yellow"),
             TextColumn("{task.fields[current_file]}", style="dim"),
+            console=self.console,
         )
         self.task_id = self.progress.add_task(
             desc, total=None, warnings="", current_file=""

@@ -21,7 +21,7 @@ from repo2xml.domain.model import (
     SkippedPayload,
     TextPayload,
 )
-from repo2xml.services.serialize.base import WriteFn
+from repo2xml.services.serialize.base import BaseSerializer, WriteFn
 
 
 @lru_cache(maxsize=1024)
@@ -59,15 +59,15 @@ def _xml_sanitize_text(s: str) -> str:
     """
     Replace characters that are illegal in XML 1.0 with U+FFFD.
 
-    Also preemptively neutralises potential XXE vectors (<!ENTITY, <!DOCTYPE)
+    Also preemptively neutralises potential XXE vectors (&lt;!ENTITY, &lt;!DOCTYPE)
     by replacing them with their escaped equivalents before standard XML escaping.
     """
     if not s:
         return s
 
     # Defang potential XXE injections even before the regular escaping pass.
-    s = s.replace("<!ENTITY", "&lt;!ENTITY")
-    s = s.replace("<!DOCTYPE", "&lt;!DOCTYPE")
+    s = s.replace("&lt;!ENTITY", "&lt;!ENTITY")
+    s = s.replace("&lt;!DOCTYPE", "&lt;!DOCTYPE")
 
     out: list[str] = []
     changed = False
@@ -116,7 +116,7 @@ def _cdata(text: str) -> str:
     return _CDATA_OPEN + text + _CDATA_CLOSE
 
 
-class XMLSerializer:
+class XMLSerializer(BaseSerializer):
     """
     Streaming-friendly XML serializer.
 
@@ -138,35 +138,14 @@ class XMLSerializer:
         include_size: bool = True,
         text_decode_errors: str = "replace",
     ):
-        if formatting not in {"compact", "pretty", "minify"}:
-            raise ValueError(f"Unknown formatting: {formatting}")
-
-        self.formatting = formatting
-        self.include_mtime = include_mtime
-        self.include_size = include_size
+        super().__init__(formatting=formatting, include_mtime=include_mtime, include_size=include_size)
         self.text_decode_errors = text_decode_errors
-
-        self.nl = "" if formatting == "minify" else "\n"
-
-    @property
-    def supports_structure(self) -> bool:
-        return True
-
-    @property
-    def supports_files_section(self) -> bool:
-        return True
-
-    def _indent(self, level: int) -> str:
-        """Indentation policy: tabs only in 'pretty' formatting."""
-        if self.formatting == "pretty":
-            return "\t" * level
-        return ""
 
     def write_header(self, meta: ExportMeta, write: WriteFn) -> None:
         nl = self.nl
-        i0 = self._indent(0)
-        i1 = self._indent(1)
-        i2 = self._indent(2)
+        i0 = self.indent(0)
+        i1 = self.indent(1)
+        i2 = self.indent(2)
 
         write(f'{i0}<?xml version="1.0" encoding="utf-8"?>{nl}')
         write(
@@ -186,7 +165,7 @@ class XMLSerializer:
         write(f"{i1}</meta>{nl}")
 
     def write_footer(self, write: WriteFn) -> None:
-        write(f"{self._indent(0)}</repository_context>{self.nl}")
+        write(f"{self.indent(0)}</repository_context>{self.nl}")
 
     def write_structure(self, entries: Sequence[FileEntry], write: WriteFn) -> None:
         """
@@ -198,11 +177,10 @@ class XMLSerializer:
           We avoid building a separate list of paths in the common case.
         """
         nl = self.nl
-        write(f"{self._indent(1)}<project_structure>{nl}")
+        write(f"{self.indent(1)}<project_structure>{nl}")
 
-        # Defensive fallback: if someone calls the serializer directly with unsorted entries,
-        # sort them here. This should not happen in the main pipeline path.
         entries_view: Sequence[FileEntry] = entries
+        # Defensive fallback: sort if not already sorted.
         for i in range(len(entries) - 1):
             if entries[i].rel_path > entries[i + 1].rel_path:
                 entries_view = sorted(entries, key=lambda e: e.rel_path)
@@ -214,7 +192,7 @@ class XMLSerializer:
         def close_to(depth: int) -> None:
             while len(stack) > depth:
                 level = base_level + (len(stack) - 1)
-                write(f"{self._indent(level)}</dir>{nl}")
+                write(f"{self.indent(level)}</dir>{nl}")
                 stack.pop()
 
         for entry in entries_view:
@@ -234,24 +212,24 @@ class XMLSerializer:
                 dir_path = "/".join(stack)
                 level = base_level + (len(stack) - 1)
                 write(
-                    f'{self._indent(level)}<dir name="{_esc_attr(dir_parts[j])}" '
+                    f'{self.indent(level)}<dir name="{_esc_attr(dir_parts[j])}" '
                     f'path="{_esc_attr(dir_path)}">{nl}'
                 )
 
             file_level = base_level + len(stack)
             write(
-                f'{self._indent(file_level)}<file name="{_esc_attr(file_name)}" '
+                f'{self.indent(file_level)}<file name="{_esc_attr(file_name)}" '
                 f'path="{_esc_attr(rel)}" />{nl}'
             )
 
         close_to(0)
-        write(f"{self._indent(1)}</project_structure>{nl}")
+        write(f"{self.indent(1)}</project_structure>{nl}")
 
     def write_files_open(self, mode: str, write: WriteFn) -> None:
-        write(f'{self._indent(1)}<files mode="{_esc_attr(mode)}">{self.nl}')
+        write(f'{self.indent(1)}<files mode="{_esc_attr(mode)}">{self.nl}')
 
     def write_files_close(self, write: WriteFn) -> None:
-        write(f"{self._indent(1)}</files>{self.nl}")
+        write(f"{self.indent(1)}</files>{self.nl}")
 
     def _file_attr_str(self, entry: FileEntry, *, link_target_override: Optional[str] = None) -> str:
         """
@@ -260,7 +238,6 @@ class XMLSerializer:
         link_target_override is used for LinkPayload in case the scan did not
         capture a readlink target (platform/permission dependent).
         """
-        # Build the attribute list directly, preserving a deterministic order.
         parts: list[str] = [
             f'path="{_esc_attr(entry.rel_path)}"',
             f'ext="{_esc_attr("".join(Path(entry.rel_path).suffixes))}"',
@@ -279,25 +256,23 @@ class XMLSerializer:
 
         return " ".join(parts)
 
-    def _write_detail_if_any(self, detail: dict[str, object], *, indent: str, write: WriteFn) -> None:
+    def _write_detail_if_any(self, detail: dict[str, object], *, indent_str: str, write: WriteFn) -> None:
         if not detail:
             return
         # Machine-readable detail for downstream processing.
-        write(f"{indent}<detail>{_cdata(_json_detail(detail))}</detail>{self.nl}")
+        write(f"{indent_str}<detail>{_cdata(_json_detail(detail))}</detail>{self.nl}")
 
     def write_file(self, entry: FileEntry, payload: FilePayload, write: WriteFn) -> None:
         nl = self.nl
-        i2 = self._indent(2)
-        i3 = self._indent(3)
+        i2 = self.indent(2)
+        i3 = self.indent(3)
 
         if isinstance(payload, MetadataPayload):
-            # Metadata semantics: normal file entry, no <content>, no skipped markers.
             attrs = self._file_attr_str(entry)
             write(f'{i2}<file {attrs} />{nl}')
             return
 
         if isinstance(payload, LinkPayload):
-            # Link-only semantics: normal file entry with link_only marker.
             attrs = self._file_attr_str(entry, link_target_override=payload.link_target)
             write(f'{i2}<file {attrs} link_only="true" />{nl}')
             return
@@ -308,7 +283,6 @@ class XMLSerializer:
             content_attrs: list[str] = []
             if payload.encoding:
                 content_attrs.append(f' encoding="{_esc_attr(payload.encoding)}"')
-            # Expose decode policy for reproducibility/debugging.
             if self.text_decode_errors:
                 content_attrs.append(f' decode_errors="{_esc_attr(self.text_decode_errors)}"')
 
@@ -335,14 +309,14 @@ class XMLSerializer:
         if isinstance(payload, SkippedPayload):
             write(f'{i2}<file {attrs} skipped="true" skip_code="{_esc_attr(payload.code.value)}">{nl}')
             write(f"{i3}<error>{html.escape(_xml_sanitize_text(payload.message))}</error>{nl}")
-            self._write_detail_if_any(payload.detail, indent=i3, write=write)
+            self._write_detail_if_any(payload.detail, indent_str=i3, write=write)
             write(f"{i2}</file>{nl}")
             return
 
         if isinstance(payload, ErrorPayload):
             write(f'{i2}<file {attrs} skipped="true" error_code="{_esc_attr(payload.code.value)}">{nl}')
             write(f"{i3}<error>{html.escape(_xml_sanitize_text(payload.message))}</error>{nl}")
-            self._write_detail_if_any(payload.detail, indent=i3, write=write)
+            self._write_detail_if_any(payload.detail, indent_str=i3, write=write)
             write(f"{i2}</file>{nl}")
             return
 

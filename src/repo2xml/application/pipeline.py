@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import BinaryIO, List, Optional
 
 from repo2xml.application.contracts import IngestorLike, ScannerLike
+from repo2xml.application.filters import apply_file_filters
 from repo2xml.application.policies import PayloadBuilder
 from repo2xml.application.progress import ProgressReporter
 from repo2xml.application.writer import BufferedTextWriter
@@ -90,21 +91,9 @@ class ExportPipeline:
             # ------------------------------------------------------------------
             # File-level size & date filtering (post-scan, pre-serialize)
             # ------------------------------------------------------------------
-            if (
-                self.config.min_file_size > 0
-                or self.config.max_file_size > 0
-                or self.config.newer_than is not None
-                or self.config.older_than is not None
-            ):
-                original_count = len(entries)
-                entries = [
-                    e
-                    for e in entries
-                    if (self.config.min_file_size == 0 or e.size >= self.config.min_file_size)
-                    and (self.config.max_file_size == 0 or e.size <= self.config.max_file_size)
-                    and (self.config.newer_than is None or (e.mtime_ns / 1e9) >= self.config.newer_than)
-                    and (self.config.older_than is None or (e.mtime_ns / 1e9) <= self.config.older_than)
-                ]
+            original_count = len(entries)
+            entries = apply_file_filters(entries, self.config)
+            if len(entries) != original_count:
                 logger.info(
                     "File-level filters removed %d entries (%d remaining).",
                     original_count - len(entries),

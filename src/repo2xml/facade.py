@@ -4,9 +4,10 @@ from __future__ import annotations
 import io
 import logging
 from pathlib import Path
-from typing import BinaryIO, Generator, Optional
+from typing import BinaryIO, Generator, List, Optional
 
 from repo2xml.application.contracts import IngestorLike, ScannerLike
+from repo2xml.application.filters import apply_file_filters
 from repo2xml.application.pipeline import ExportPipeline
 from repo2xml.application.progress import NullProgressReporter, ProgressReporter
 from repo2xml.config import Repo2XMLConfig
@@ -139,6 +140,17 @@ class Repo2XML:
     def scan(self) -> Generator[FileEntry, None, None]:
         """Yield file entries discovered in the repository (no content reads)."""
         yield from self._scanner.scan()
+
+    def filtered_scan(self) -> List[FileEntry]:
+        """
+        Scan and apply file-level size/date filters, returning sorted entries.
+
+        Useful for dry‑run inspection and other pre‑serialisation overviews.
+        """
+        entries = list(self._scanner.scan())
+        entries = apply_file_filters(entries, self.config)
+        entries.sort(key=lambda e: e.rel_path)
+        return entries
 
     def export(
         self,

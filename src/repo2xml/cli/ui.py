@@ -12,7 +12,7 @@ class LogLevel(str, Enum):
     error = "error"
 
 
-def setup_logging(level: LogLevel) -> logging.Logger:
+def setup_logging(level: LogLevel, *, no_color: bool = False) -> logging.Logger:
     """
     Configure stderr logging with Rich handler for colorised output.
 
@@ -26,12 +26,14 @@ def setup_logging(level: LogLevel) -> logging.Logger:
         LogLevel.error: logging.ERROR,
     }
     try:
+        from rich.console import Console
         from rich.logging import RichHandler
 
+        console = Console(no_color=no_color)
         logging.basicConfig(
             level=mapping[level],
             format="%(message)s",
-            handlers=[RichHandler(show_time=False, show_level=True, show_path=False)],
+            handlers=[RichHandler(console=console, show_time=False, show_level=True, show_path=False)],
         )
     except ImportError:
         # Fallback to plain formatting (e.g., during testing without Rich)
