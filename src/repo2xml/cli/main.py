@@ -7,7 +7,7 @@ from typing import List, Optional
 
 import typer
 
-from repo2xml.application.progress import NullProgressReporter, TqdmProgressReporter
+from repo2xml.application.progress import NullProgressReporter, RichProgressReporter
 from repo2xml.cli.ui import LogLevel, setup_logging
 from repo2xml.config import (
     BinaryMode,
@@ -338,7 +338,7 @@ def main(
         compress=compress,
     )
 
-    reporter = TqdmProgressReporter() if progress else NullProgressReporter()
+    reporter = RichProgressReporter() if progress else NullProgressReporter()
 
     try:
         with target.open() as out_stream:
