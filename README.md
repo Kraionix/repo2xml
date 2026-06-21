@@ -1,7 +1,11 @@
 # repo2xml
 
 Convert a source code repository into a single, structured context document for LLM ingestion.
-Now also supports the reverse operation: restore a full repository from an XML export.
+Supports the reverse operation: restore a full repository from an XML export.
+
+**Version 0.3.0**
+
+---
 
 ## Features
 
@@ -20,6 +24,22 @@ Now also supports the reverse operation: restore a full repository from an XML e
   - Restore modification times (optional)
   - Skip or overwrite existing files
   - Comprehensive statistics and error reporting
+  - Strict XML validation (optional)
+- **Pluggable classification engine**
+  - Fast binary/text detection using extension whitelists and content heuristics
+  - Configurable via `.repo2xml-classify.yml` – override extensions, adjust binary threshold
+  - Built‑in support for common text and binary formats
+- **Extensible secret redaction**
+  - Detect and replace API keys, tokens, private keys before export
+  - Built‑in patterns grouped by type (API keys, tokens, private keys, generic)
+  - Custom rules via `.repo2xml-redact.yml` – add patterns, override built‑ins, exclude files
+  - Supports backreferences in replacements (e.g. `password=…` → `password=<redacted:password>`)
+  - Redaction statistics in report
+- **Internal scanner registry**
+  - Default `filesystem` scanner; new backends (e.g. Git history, S3) can be added later
+- **Cross‑platform CLI** with rich progress bars, detailed reports
+
+---
 
 ## Installation
 
@@ -33,6 +53,10 @@ For zstd compression support:
 pip install -e ".[zstd]"
 ```
 
+Python 3.10+ is required.
+
+---
+
 ## Quick Start
 
 ### Export a repository
@@ -41,7 +65,10 @@ pip install -e ".[zstd]"
 # Full XML export
 repo2xml -o context.xml
 
-# Export with `--help` to see all options
+# Export with redacted secrets and a classification config
+repo2xml --redact-secrets --redact-config .repo2xml-redact.yml -o context.xml
+
+# See all options
 repo2xml --help
 ```
 
@@ -61,6 +88,8 @@ repo2xml restore context.xml -o restored_project --overwrite --report
 python -c "import xml.etree.ElementTree as ET; ET.parse('context.xml'); print('XML OK')"
 ```
 
+---
+
 ## CLI Commands
 
 ```
@@ -70,8 +99,6 @@ repo2xml restore [RESTORE OPTIONS] XML_FILE
 
 ### Export options (default command)
 
-See `repo2xml --help` for the complete list. Key options:
-
 | Option | Description |
 |--------|-------------|
 | `-o, --output PATH` | Output file (default: `context.xml`) |
@@ -79,8 +106,15 @@ See `repo2xml --help` for the complete list. Key options:
 | `--binary {skip,base64,hash}` | Binary file handling |
 | `--formatting {compact,pretty,minify}` | XML formatting style |
 | `--dry-run` | Show files that would be processed |
-| `--report` | Detailed skip/error breakdown |
+| `--report` | Detailed skip/error breakdown plus redaction/classification statistics |
 | `--no-timestamp` / `--no-mtime` / `--no-size` | Deterministic output |
+| `--source` | Scanner source (default: `filesystem`) |
+| `--source-option` | Key=value pairs for the scanner (repeatable) |
+| `--classify-config` | Path to YAML file overriding classification rules |
+| `--redact-secrets` | Enable secret redaction |
+| `--redact-config` | Path to YAML file overriding redaction rules |
+| `--compress {none,gzip,zstd}` | Output stream compression |
+| `--stdout` / `--clipboard` | Alternative output targets |
 
 ### Restore options
 
@@ -92,12 +126,15 @@ See `repo2xml --help` for the complete list. Key options:
 | `--create-empty` | Create empty files for skipped/errored entries |
 | `--report` | Detailed skip/error breakdown |
 | `--quiet` | Suppress non‑error output |
+| `--no-strict-validation` | Disable strict XML validation (useful for recovery) |
+
+---
 
 ## Library Usage
 
 ```python
 from pathlib import Path
-from repo2xml import RepoXML, ExportConfig
+from repo2xml import RepoXML, ExportConfig, RestoreConfig
 
 # Export
 config = ExportConfig()
@@ -107,8 +144,6 @@ with open("context.xml", "wb") as f:
 print(stats)
 
 # Restore
-from repo2xml import RestoreConfig
-
 config = RestoreConfig(overwrite=True)
 engine = RepoXML(config)
 with open("context.xml", "rb") as f:
@@ -116,19 +151,104 @@ with open("context.xml", "rb") as f:
 print(stats)
 ```
 
+---
+
+## Configuration Files
+
+### `.repo2xml-redact.yml`
+
+Place this file in your project root to customise secret redaction.  
+It is automatically discovered unless you specify `--redact-config`.
+
+```yaml
+# .repo2xml-redact.yml
+builtin_rules: all   # all | none | [api_keys, tokens, ...]
+
+rules:
+  - name: my-custom-token
+    pattern: '\bmysecret-\d{10}\b'
+    replacement: '<redacted:custom>'
+
+  - name: aws-access-key   # override built‑in
+    pattern: '\bAKIA[0-9A-Z]{16}\b'
+    replacement: '<redacted:aws-key-custom>'
+
+  - name: slack-token      # disable built‑in
+    enabled: false
+
+exclude_files:
+  - 'tests/**'
+  - '*.test.*'
+```
+
+### `.repo2xml-classify.yml`
+
+Customise which file extensions are treated as text or binary, and tweak the
+binary detection heuristic.
+
+```yaml
+# .repo2xml-classify.yml
+
+# Add extensions to built‑in lists
+text_ext_add: [".graphql", ".vue"]
+binary_ext_remove: [".dat"]
+
+# Or replace entire lists
+text_extensions:
+  - .py
+  - .js
+  - .txt
+
+# Compound suffixes (e.g. .tar.gz)
+compound_binary_add: [".parquet"]
+
+# Adjust binary threshold (default 0.30)
+binary_threshold: 0.35
+```
+
+---
+
 ## Output Format
 
 The XML schema (version 1.1) is fully described inside the generated `<meta>` block.
 The same format is accepted by the `restore` command.
+
+---
 
 ## Architecture
 
 `repo2xml` is built with a layered, extensible architecture:
 
 - **Domain** – stable models (`FileEntry`, `Payload`, `ExportStats`, `RestoreStats`)
-- **Services** – IO‑bound components (filesystem scanner, ingestor, serializer/deserializer, restorer)
+- **Services** – IO‑bound components:
+  - `scan` – filesystem scanner and gitignore engine
+  - `classify` – pluggable binary/text classification engine
+  - `ingest` – safe file reading, redaction engine
+  - `serialize` – XML serializer/deserializer (other formats planned)
+  - `restore` – filesystem restorer
+  - `output` – output targets (file, stdout, clipboard, /dev/null)
 - **Application** – use‑case orchestrators (`ExportPipeline`, `RestorePipeline`, policies)
 - **Facade** – `RepoXML` exposes a clean public API
-- **CLI** – Typer‑based command line interface
+- **CLI** – Typer‑based command line interface with Rich progress reporting
 
-Adding a new output format or a new content payload type requires implementing well‑defined abstract base classes, ensuring consistency and exhaustiveness.
+Adding a new scanner backend, output format, or redaction rule requires
+implementing well‑defined abstract base classes, ensuring consistency and
+extensibility.
+
+---
+
+## Security
+
+Secret redaction is enabled via `--redact-secrets`. The engine uses
+regular expressions to identify common credentials. You can control which
+patterns are active and add your own through a YAML configuration file.
+
+Redaction is best‑effort and should not be relied upon as the sole
+protection against credential leakage. Always review the exported context
+before sharing with third parties.
+
+---
+
+## License
+
+MIT
