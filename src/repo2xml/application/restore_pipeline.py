@@ -23,7 +23,8 @@ class RestorePipeline:
     def execute(self, input_stream: BinaryIO, output_root: Path, progress: ProgressReporter) -> RestoreStats:
         progress.set_phase("Parsing")
         progress.set_total(None)
-        repository = self.deserializer.parse(input_stream)
+        # Pass the strict flag from the restore configuration
+        repository = self.deserializer.parse(input_stream, strict=self.config.strict_validation)
         progress.set_phase("Restoring")
         # The number of files isn't known until we consume, but we can provide an indeterminate bar.
         restorer = FilesystemRestorer(

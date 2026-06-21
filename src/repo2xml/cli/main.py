@@ -120,6 +120,12 @@ def restore(
     report: bool = typer.Option(False, "--report", help="Print detailed report."),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress non-error output."),
     no_color: bool = typer.Option(False, "--no-color", help="Disable colored output."),
+    # New flag to bypass strict XML validation
+    no_strict_validation: bool = typer.Option(
+        False,
+        "--no-strict-validation",
+        help="Skip strict XML validation before restoration (use only for recovery).",
+    ),
 ) -> None:
     """Restore a repository from a repo2xml XML export."""
     console = Console(no_color=no_color)
@@ -132,4 +138,5 @@ def restore(
         restore_mtime=not no_mtime,
         create_empty=create_empty,
         report=report,
+        strict_validation=not no_strict_validation,
     )

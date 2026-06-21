@@ -123,7 +123,8 @@ class RestoreConfig:
     overwrite: bool = False
     restore_mtime: bool = True
     create_empty_for_missing: bool = False
-    # filter options could be added later
+    # New field: enable strict XML validation before restoring
+    strict_validation: bool = True
 
     def normalize(self) -> None:
         self.format = (self.format or "xml").strip().lower()

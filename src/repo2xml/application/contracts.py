@@ -100,8 +100,15 @@ class Deserializer(ABC):
     """Abstract deserialiser for a specific format."""
 
     @abstractmethod
-    def parse(self, stream: BinaryIO) -> ParsedRepository:
-        """Read the stream and return a structured representation."""
+    def parse(self, stream: BinaryIO, *, strict: bool = False) -> ParsedRepository:
+        """
+        Read the stream and return a structured representation.
+
+        If `strict` is True, implementations should perform rigorous
+        structural validation (e.g., presence of required elements,
+        path safety checks, schema version checks) and raise
+        DeserializationError on any violation.
+        """
         ...
 
     # Optionally, a format can advertise which payload types it can reconstruct.

@@ -29,6 +29,7 @@ from repo2xml.domain.model import (
     TextPayload,
 )
 from repo2xml.services.serialize.xml.format_spec import XmlFormatSpec
+from repo2xml.services.serialize.xml.validation import XMLStructureValidator
 from repo2xml.utils.version import tool_version
 
 logger = logging.getLogger("repo2xml.deserializer")
@@ -40,13 +41,32 @@ class XMLDeserializer(Deserializer):
     def __init__(self) -> None:
         self._spec = XmlFormatSpec
 
-    def parse(self, stream: BinaryIO) -> ParsedRepository:
+    def parse(self, stream: BinaryIO, *, strict: bool = False) -> ParsedRepository:
+        """
+        Parse an XML stream into a ParsedRepository.
+
+        If `strict` is True, the document is validated against structural rules
+        before data extraction. A secure XML parser is always used to prevent
+        entity expansion and external entity attacks.
+        """
+        # Use a secure parser that disables DTD and external entities
+        parser = ET.XMLParser(
+            target=ET.TreeBuilder(),
+            resolve_entities=False,
+            forbid_dtd=True,      # Prevent DOCTYPE declarations entirely
+        )
         try:
-            tree = ET.parse(stream)
+            tree = ET.parse(stream, parser=parser)
         except ET.ParseError as e:
             raise DeserializationError(f"Malformed XML: {e}") from e
         root = tree.getroot()
 
+        if strict:
+            # Perform full structural validation before touching the data
+            validator = XMLStructureValidator(root)
+            validator.validate()
+
+        # Proceed with normal data extraction
         if root.tag != self._spec.TAG_ROOT:
             raise DeserializationError(f"Unexpected root element: {root.tag}")
 
@@ -80,7 +100,6 @@ class XMLDeserializer(Deserializer):
         if struct_el is None:
             return []
         entries: List[FileEntry] = []
-        # We only collect files; directories are implicitly created on restore.
         self._walk_structure(struct_el, entries, "")
         return entries
 
@@ -99,7 +118,7 @@ class XMLDeserializer(Deserializer):
                 is_symlink = child.get(self._spec.ATTR_SYMLINK) == "true"
                 link_target = child.get(self._spec.ATTR_LINK_TARGET)
                 entries.append(FileEntry(
-                    abs_path=Path(rel_path),  # dummy, will be recomputed during restore
+                    abs_path=Path(rel_path),
                     rel_path=rel_path,
                     name=file_name,
                     size=size,
@@ -167,8 +186,6 @@ class XMLDeserializer(Deserializer):
             return TextPayload(text=text, encoding=encoding)
         elif payload_type is BinaryBase64Payload:
             raw = content_info.get("text", "") if content_info else ""
-            # Split into chunks? We'll just keep the whole string as a single chunk for simplicity.
-            # The restore process can decode it.
             return BinaryBase64Payload(chunks=[raw])
         elif payload_type is BinaryHashPayload:
             sha = content_info.get("text", "") if content_info else ""

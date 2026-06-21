@@ -273,12 +273,14 @@ def execute_restore(
     restore_mtime: bool,
     create_empty: bool,
     report: bool,
+    strict_validation: bool = True,  # new parameter
 ) -> None:
     """Run the restore workflow."""
     config = RestoreConfig(
         overwrite=overwrite,
         restore_mtime=restore_mtime,
         create_empty_for_missing=create_empty,
+        strict_validation=strict_validation,  # pass to config
     )
     config.normalize()
     config.validate()
