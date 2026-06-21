@@ -1,13 +1,13 @@
 # src/repo2xml/application/filters.py
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List
 
-from repo2xml.config import Repo2XMLConfig
+from repo2xml.config import ExportConfig
 from repo2xml.domain.model import FileEntry
 
 
-def apply_file_filters(entries: List[FileEntry], config: Repo2XMLConfig) -> List[FileEntry]:
+def apply_file_filters(entries: List[FileEntry], config: ExportConfig) -> List[FileEntry]:
     """
     Filter FileEntry list by size and mtime according to config.
 
