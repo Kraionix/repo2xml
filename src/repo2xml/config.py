@@ -82,9 +82,9 @@ class ExportConfig:
     max_file_size: int = 0
     newer_than: Optional[float] = None
     older_than: Optional[float] = None
-    # --- New fields for scanner selection ---
-    source: str = "filesystem"                  # Which scanner to use
-    source_options: Dict[str, Any] = field(default_factory=dict)  # Extra args for the scanner
+    source: str = "filesystem"
+    source_options: Dict[str, Any] = field(default_factory=dict)
+    redact_config_path: Optional[Path] = None
 
     def normalize(self) -> None:
         self.format = (self.format or "xml").strip().lower()
@@ -121,6 +121,11 @@ class ExportConfig:
                 )
         if not self.source:
             raise ConfigurationError("source must not be empty")
+        if self.redact_config_path is not None:
+            if not self.redact_config_path.is_file():
+                raise ConfigurationError(
+                    f"Redact config file does not exist: {self.redact_config_path}"
+                )
 
 
 @dataclass(slots=True)

@@ -44,7 +44,7 @@ def main(
     dry_run: bool = typer.Option(False, "--dry-run", help="Show filtered project tree without generating output."),
     progress: bool = typer.Option(True, "--progress/--no-progress", help="Show progress bars."),
     report: bool = typer.Option(False, "--report/--no-report", help="Print detailed skip/error breakdown."),
-    redact: bool = typer.Option(False, "--redact-secrets/--no-redact-secrets", help="Redact secrets."),
+    redact: bool = typer.Option(False, "--redact-secrets/--no-redact-secrets", help="Redact secrets from text files."),
     log_level: LogLevel = typer.Option(LogLevel.info, "--log-level", help="Logging verbosity."),
     validate_xml: bool = typer.Option(False, "--validate-xml", help="Validate the generated XML."),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress non-error output."),
@@ -63,12 +63,20 @@ def main(
     binary: BinaryMode = typer.Option(BinaryMode.skip, "--binary", help="How to handle binary files."),
     newline: NewlineMode = typer.Option(NewlineMode.preserve, "--newline", help="Newline normalization."),
     decode_errors: DecodeErrors = typer.Option(DecodeErrors.replace, "--decode-errors", help="Text decoding errors policy."),
-    # --- New scanner selection options ---
     source: str = typer.Option("filesystem", "--source", help="Scanner source (e.g., 'filesystem')."),
     source_option: Optional[List[str]] = typer.Option(
         None,
         "--source-option",
         help="Extra key=value pairs for the scanner. Can be repeated.",
+    ),
+    redact_config: Optional[Path] = typer.Option(
+        None,
+        "--redact-config",
+        help="Path to YAML file with redaction rules.",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        resolve_path=True,
     ),
 ) -> None:
     """repo2xml: convert a repository into a single context document for LLM ingestion."""
@@ -116,6 +124,7 @@ def main(
         decode_errors=decode_errors,
         source=source,
         source_option=source_option,
+        redact_config=redact_config,
     )
 
 

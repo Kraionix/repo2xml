@@ -104,6 +104,7 @@ def execute_export(
     decode_errors: DecodeErrors,
     source: str = "filesystem",
     source_option: Optional[list[str]] = None,
+    redact_config: Optional[Path] = None,
 ) -> None:
     """Run the full repo2xml export workflow."""
     if version:
@@ -144,10 +145,17 @@ def execute_export(
     if older_than:
         older_ts = parse_datetime_arg(older_than)
 
-    processors = []
+    # Build text processors list
+    text_processors = []
     if redact:
-        from repo2xml.services.ingest.redact import redact_secrets
-        processors.append(redact_secrets)
+        # Use the new RedactionEngine
+        from repo2xml.services.ingest.redact_engine import RedactionEngine
+        try:
+            engine = RedactionEngine(config_path=redact_config)
+        except ConfigurationError as e:
+            logger.error("Redaction setup failed: %s", e)
+            raise typer.Exit(code=2)
+        text_processors.append(engine)
 
     # Parse --source-option key=value pairs into a dict
     source_opts = {}
@@ -185,13 +193,14 @@ def execute_export(
             max_base64_size=max_size,
             max_hash_size=0,
             report=report,
-            text_processors=processors,
+            text_processors=text_processors,
             min_file_size=size_min,
             max_file_size=size_max,
             newer_than=newer_ts,
             older_than=older_ts,
             source=source,
             source_options=source_opts,
+            redact_config_path=redact_config,
         )
         config.normalize()
         config.validate()

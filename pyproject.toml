@@ -25,6 +25,9 @@ dev = [
   "mypy>=1.10.0",
   "pytest>=8.0.0",
 ]
+redact-yaml = [
+  "pyyaml>=6.0",
+]
 
 [project.scripts]
 repo2xml = "repo2xml.cli.main:app"
