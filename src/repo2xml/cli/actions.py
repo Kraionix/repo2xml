@@ -148,10 +148,9 @@ def execute_export(
     # Build text processors list
     text_processors = []
     if redact:
-        # Use the new RedactionEngine
         from repo2xml.services.ingest.redact_engine import RedactionEngine
         try:
-            engine = RedactionEngine(config_path=redact_config)
+            engine = RedactionEngine(config_path=redact_config, root_path=root)
         except ConfigurationError as e:
             logger.error("Redaction setup failed: %s", e)
             raise typer.Exit(code=2)

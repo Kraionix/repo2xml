@@ -1,0 +1,50 @@
+# Built-in redaction rules bundled with repo2xml.
+# Loaded when no project-specific config is found.
+
+version: 1
+
+# All built-in rules are placed under the "rules" key.
+# Each rule has a unique name, a regex pattern, a replacement,
+# and a list of groups for selective enabling.
+rules:
+  - name: private-key-block
+    pattern: '-----BEGIN(?: [A-Z0-9]+)? PRIVATE KEY-----[\s\S]*?-----END(?: [A-Z0-9]+)? PRIVATE KEY-----'
+    replacement: '<redacted:private-key>'
+    groups:
+      - private_keys
+
+  - name: aws-access-key-id
+    pattern: '\bAKIA[0-9A-Z]{16}\b'
+    replacement: '<redacted:aws-access-key-id>'
+    groups:
+      - api_keys
+
+  - name: github-token
+    pattern: '\bgh[opurs]_[A-Za-z0-9]{30,}\b'
+    replacement: '<redacted:github-token>'
+    groups:
+      - tokens
+
+  - name: slack-token
+    pattern: '\bxox[abpra]-[A-Za-z0-9-]+\b'
+    replacement: '<redacted:slack-token>'
+    groups:
+      - tokens
+
+  - name: stripe-secret-key
+    pattern: '\b[rs]k_live_[A-Za-z0-9]{24,}\b'
+    replacement: '<redacted:stripe-secret-key>'
+    groups:
+      - api_keys
+
+  - name: jwt
+    pattern: '\beyJ[A-Za-z0-9_-]{20,}\.eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b'
+    replacement: '<redacted:jwt>'
+    groups:
+      - tokens
+
+  - name: generic-credential
+    pattern: '(?i)\b(password|passwd|pwd|secret|token|api[_-]?key)\b\s*[:=]\s*\S+'
+    replacement: '<redacted:generic>'
+    groups:
+      - generic

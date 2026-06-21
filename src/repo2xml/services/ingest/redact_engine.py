@@ -1,15 +1,18 @@
 # src/repo2xml/services/ingest/redact_engine.py
 """Extensible redaction engine with YAML-based configuration.
 
-Supports user-supplied rule files to override built-in patterns
-and exclude specific files from redaction.
+Automatically discovers .repo2xml-redact.yml in the project root
+if no explicit config path is given.
 """
+
 from __future__ import annotations
 
 import logging
 import re
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Pattern, Union
+
+import yaml
 
 from repo2xml.domain.exceptions import ConfigurationError
 from repo2xml.services.ingest.builtin_rules import RedactRule, get_builtin_rules
@@ -23,26 +26,32 @@ class RedactionEngine:
     Implements the `TextProcessor` protocol (Callable[[str], str]).
     """
 
-    def __init__(self, config_path: Optional[Path] = None):
+    def __init__(self, config_path: Optional[Path] = None, root_path: Optional[Path] = None):
         """
         Args:
-            config_path: Optional path to a YAML configuration file.
-                         If None, only built-in rules are used.
+            config_path: Path to a YAML configuration file. If None,
+                the engine looks for .repo2xml-redact.yml in `root_path`
+                (if provided) before falling back to built-in rules.
+            root_path: The root of the repository being scanned (used
+                to locate the default config file).
         Raises:
-            ConfigurationError: If the config file cannot be loaded
-                                or contains invalid data.
+            ConfigurationError: If a config file is given but cannot
+                be loaded, or contains invalid data.
         """
         self._rules: List[_CompiledRule] = []
         self._exclude_patterns: List[Pattern[str]] = []
 
-        # Load built-in rules
+        # Determine which config file to use
+        effective_config_path = self._resolve_config_path(config_path, root_path)
+        user_config = self._load_config(effective_config_path) if effective_config_path else {}
+
+        # Load built-in rules (from bundled YAML)
         builtin = get_builtin_rules()
-        user_config = self._load_config(config_path) if config_path else {}
 
         # Determine which built-in groups to keep
         builtin_setting = user_config.get("builtin_rules", "all")
         if builtin_setting == "all":
-            self._add_builtin_rules(builtin, {})
+            self._add_builtin_rules(builtin, set())
         elif builtin_setting == "none":
             pass  # no built-in rules
         elif isinstance(builtin_setting, list):
@@ -78,7 +87,6 @@ class RedactionEngine:
         for glob in exclude_globs:
             try:
                 import fnmatch
-                # Translate simple glob to regex (fnmatch.translate is available)
                 regex = fnmatch.translate(glob)
                 self._exclude_patterns.append(re.compile(regex))
             except Exception as e:
@@ -102,19 +110,29 @@ class RedactionEngine:
                 return True
         return False
 
-    def _load_config(self, path: Path) -> dict:
+    @staticmethod
+    def _resolve_config_path(explicit: Optional[Path], root_path: Optional[Path]) -> Optional[Path]:
+        """Determine which configuration file to load.
+
+        Priority:
+        1) Explicitly provided path (--redact-config).
+        2) .repo2xml-redact.yml in the root_path (if root_path is given and file exists).
+        3) None (use built-in rules).
+        """
+        if explicit is not None:
+            return explicit
+        if root_path is not None:
+            candidate = root_path / ".repo2xml-redact.yml"
+            if candidate.is_file():
+                return candidate
+        return None
+
+    @staticmethod
+    def _load_config(path: Path) -> dict:
         """Load a YAML configuration file.
 
-        Raises ConfigurationError if PyYAML is unavailable or the file
-        cannot be parsed.
+        Raises ConfigurationError if the file cannot be read or parsed.
         """
-        try:
-            import yaml
-        except ImportError:
-            raise ConfigurationError(
-                "YAML config requires PyYAML.  Install with: pip install pyyaml"
-            ) from None
-
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f)
