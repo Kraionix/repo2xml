@@ -15,7 +15,7 @@ from repo2xml.domain.exceptions import FacadeError, Repo2XMLError
 from repo2xml.domain.model import ExportStats, FileEntry, RestoreStats
 from repo2xml.services.ingest.ingestor import StandardIngestor
 from repo2xml.services.scan.gitignore import GitignoreEngine
-from repo2xml.services.scan.scanner import FileSystemScanner
+from repo2xml.services.scan.registry import create_scanner
 from repo2xml.services.serialize.base import WriteFn
 from repo2xml.services.serialize.factory import get_format_factory
 
@@ -42,20 +42,25 @@ class RepoXML:
         config: ExportConfig = self.config
         root = root_path.resolve()
 
-        # Build scanner and ingestor
+        # Build ignore provider (same as before)
         gitignore_engine: IgnoreProvider = GitignoreEngine(
             root_path=root,
             user_ignore=config.ignore_patterns,
             user_include=config.include_patterns,
         )
-        scanner = FileSystemScanner(
-            root=root,
+
+        # Create scanner via the registry
+        scanner = create_scanner(
+            config.source,
+            root_path=root,
             ignore_provider=gitignore_engine,
             use_gitignore=config.use_gitignore,
             follow_symlinks_dirs=config.follow_symlinks_dirs,
             symlinks_files=config.symlinks_files.value,
             hard_exclude_dirs=set(config.hard_exclude_dirs),
+            **config.source_options,
         )
+
         ingestor = StandardIngestor(
             newline_mode=config.newline.value,
             decode_errors=config.decode_errors.value,
@@ -79,19 +84,24 @@ class RepoXML:
             raise FacadeError("filtered_scan requires ExportConfig")
         config: ExportConfig = self.config
         root = root_path.resolve()
+
         gitignore_engine: IgnoreProvider = GitignoreEngine(
             root_path=root,
             user_ignore=config.ignore_patterns,
             user_include=config.include_patterns,
         )
-        scanner = FileSystemScanner(
-            root=root,
+
+        scanner = create_scanner(
+            config.source,
+            root_path=root,
             ignore_provider=gitignore_engine,
             use_gitignore=config.use_gitignore,
             follow_symlinks_dirs=config.follow_symlinks_dirs,
             symlinks_files=config.symlinks_files.value,
             hard_exclude_dirs=set(config.hard_exclude_dirs),
+            **config.source_options,
         )
+
         entries = list(scanner.scan())
         entries = apply_file_filters(entries, config)
         entries.sort(key=lambda e: e.rel_path)

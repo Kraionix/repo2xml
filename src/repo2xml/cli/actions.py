@@ -102,6 +102,8 @@ def execute_export(
     binary: BinaryMode,
     newline: NewlineMode,
     decode_errors: DecodeErrors,
+    source: str = "filesystem",
+    source_option: Optional[list[str]] = None,
 ) -> None:
     """Run the full repo2xml export workflow."""
     if version:
@@ -147,6 +149,17 @@ def execute_export(
         from repo2xml.services.ingest.redact import redact_secrets
         processors.append(redact_secrets)
 
+    # Parse --source-option key=value pairs into a dict
+    source_opts = {}
+    if source_option:
+        for item in source_option:
+            if "=" not in item:
+                raise typer.BadParameter(
+                    f"Source option must be in key=value format: '{item}'"
+                )
+            key, _, value = item.partition("=")
+            source_opts[key.strip()] = value.strip()
+
     try:
         config = ExportConfig(
             format="xml",
@@ -177,6 +190,8 @@ def execute_export(
             max_file_size=size_max,
             newer_than=newer_ts,
             older_than=older_ts,
+            source=source,
+            source_options=source_opts,
         )
         config.normalize()
         config.validate()
@@ -273,14 +288,14 @@ def execute_restore(
     restore_mtime: bool,
     create_empty: bool,
     report: bool,
-    strict_validation: bool = True,  # new parameter
+    strict_validation: bool = True,
 ) -> None:
     """Run the restore workflow."""
     config = RestoreConfig(
         overwrite=overwrite,
         restore_mtime=restore_mtime,
         create_empty_for_missing=create_empty,
-        strict_validation=strict_validation,  # pass to config
+        strict_validation=strict_validation,
     )
     config.normalize()
     config.validate()

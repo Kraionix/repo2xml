@@ -63,6 +63,13 @@ def main(
     binary: BinaryMode = typer.Option(BinaryMode.skip, "--binary", help="How to handle binary files."),
     newline: NewlineMode = typer.Option(NewlineMode.preserve, "--newline", help="Newline normalization."),
     decode_errors: DecodeErrors = typer.Option(DecodeErrors.replace, "--decode-errors", help="Text decoding errors policy."),
+    # --- New scanner selection options ---
+    source: str = typer.Option("filesystem", "--source", help="Scanner source (e.g., 'filesystem')."),
+    source_option: Optional[List[str]] = typer.Option(
+        None,
+        "--source-option",
+        help="Extra key=value pairs for the scanner. Can be repeated.",
+    ),
 ) -> None:
     """repo2xml: convert a repository into a single context document for LLM ingestion."""
     console = Console(no_color=no_color)
@@ -107,6 +114,8 @@ def main(
         binary=binary,
         newline=newline,
         decode_errors=decode_errors,
+        source=source,
+        source_option=source_option,
     )
 
 
@@ -120,7 +129,6 @@ def restore(
     report: bool = typer.Option(False, "--report", help="Print detailed report."),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress non-error output."),
     no_color: bool = typer.Option(False, "--no-color", help="Disable colored output."),
-    # New flag to bypass strict XML validation
     no_strict_validation: bool = typer.Option(
         False,
         "--no-strict-validation",

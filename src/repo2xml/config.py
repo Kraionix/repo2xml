@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from repo2xml.domain.exceptions import ConfigurationError
 
@@ -82,9 +82,13 @@ class ExportConfig:
     max_file_size: int = 0
     newer_than: Optional[float] = None
     older_than: Optional[float] = None
+    # --- New fields for scanner selection ---
+    source: str = "filesystem"                  # Which scanner to use
+    source_options: Dict[str, Any] = field(default_factory=dict)  # Extra args for the scanner
 
     def normalize(self) -> None:
         self.format = (self.format or "xml").strip().lower()
+        self.source = self.source.strip().lower()
         seen: set[str] = set()
         deduped: list[str] = []
         for d in self.hard_exclude_dirs:
@@ -115,6 +119,8 @@ class ExportConfig:
                 raise ConfigurationError(
                     f"Include pattern '{pat}' must not start with '!'."
                 )
+        if not self.source:
+            raise ConfigurationError("source must not be empty")
 
 
 @dataclass(slots=True)
@@ -123,7 +129,6 @@ class RestoreConfig:
     overwrite: bool = False
     restore_mtime: bool = True
     create_empty_for_missing: bool = False
-    # New field: enable strict XML validation before restoring
     strict_validation: bool = True
 
     def normalize(self) -> None:
