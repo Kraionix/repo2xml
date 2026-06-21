@@ -14,7 +14,7 @@ from repo2xml.config import ExportConfig, RestoreConfig
 from repo2xml.domain.exceptions import FacadeError, Repo2XMLError
 from repo2xml.domain.model import ExportStats, FileEntry, RestoreStats
 from repo2xml.services.ingest.ingestor import StandardIngestor
-from repo2xml.services.ingest.classify import ClassificationEngine
+from repo2xml.services.classify import ClassificationEngine
 from repo2xml.services.ingest.redact import RedactionEngine
 from repo2xml.services.scan.gitignore import GitignoreEngine
 from repo2xml.services.scan.registry import create_scanner
@@ -27,8 +27,6 @@ class RepoXML:
 
     def __init__(self, config: Union[ExportConfig, RestoreConfig]):
         self.config = config
-
-    # ---- Export API ----
 
     def export(
         self,
@@ -88,7 +86,6 @@ class RepoXML:
         return pipeline.execute(output_stream=output_stream, progress=reporter)
 
     def filtered_scan(self, root_path: Path) -> List[FileEntry]:
-        """Return a filtered list of FileEntry for dry-run display."""
         if not isinstance(self.config, ExportConfig):
             raise FacadeError("filtered_scan requires ExportConfig")
         config: ExportConfig = self.config
@@ -121,8 +118,6 @@ class RepoXML:
         self.export(root_path, buf)
         return buf.getvalue()
 
-    # ---- Restore API ----
-
     def restore(
         self,
         input_stream: BinaryIO,
@@ -141,7 +136,6 @@ class RepoXML:
             return self.restore(fh, output_root)
 
 
-# Backward-compatible alias
 Repo2XML = RepoXML
 
 

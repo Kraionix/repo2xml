@@ -261,6 +261,18 @@ def execute_export(
                         table.add_row(f"  {rule_name}", str(count))
                 console.print(table)
 
+            if stats.classification_stats:
+                cs = stats.classification_stats
+                table = Table(title="Classification Statistics", show_header=True, header_style="bold")
+                table.add_column("Metric", style="dim")
+                table.add_column("Value", justify="right")
+                table.add_row("Total files", str(cs.total_files))
+                table.add_row("By extension", str(cs.by_extension))
+                table.add_row("By content analysis", str(cs.by_content))
+                if cs.errors:
+                    table.add_row("Errors", str(cs.errors))
+                console.print(table)
+
         if validate_xml:
             xml_path = out_abs
             try:

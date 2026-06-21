@@ -148,15 +148,12 @@ class ExportPipeline:
             errors_by: dict[str, int] = {}
 
             for entry in entries:
-                # Classify the file (text/binary/error)
                 if self._classification_engine:
                     classification = self._classification_engine.classify(entry)
                 else:
-                    # Fallback (should not happen)
                     classification = None
                 payload = self._payloads.build(entry, classification)
 
-                # Apply secret redaction to text payloads
                 if isinstance(payload, TextPayload) and self._redaction_engine:
                     new_text = self._redaction_engine.process(entry, payload.text)
                     payload = TextPayload(text=new_text, encoding=payload.encoding)
@@ -192,7 +189,8 @@ class ExportPipeline:
             )
             if self._redaction_engine:
                 stats.redaction_stats = self._redaction_engine.get_stats()
-            # Classification stats could be attached here if desired
+            if self._classification_engine:
+                stats.classification_stats = self._classification_engine.get_stats()
             return stats
 
         finally:

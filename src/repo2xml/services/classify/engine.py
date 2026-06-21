@@ -7,14 +7,14 @@ from pathlib import Path
 from typing import Optional
 
 from repo2xml.domain.model import FileEntry
-from repo2xml.services.ingest.classify.classifiers import (
+from repo2xml.services.classify.classifiers import (
     SNIFF_BYTES,
     ExtensionClassifier,
     detect_bom,
     looks_binary,
 )
-from repo2xml.services.ingest.classify.models import ClassificationResult, ClassificationStats
-from repo2xml.services.ingest.classify.rule_loader import load_config
+from repo2xml.services.classify.models import ClassificationResult, ClassificationStats
+from repo2xml.services.classify.rule_loader import load_config
 
 logger = logging.getLogger("repo2xml.classify")
 

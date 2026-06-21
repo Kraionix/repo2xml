@@ -82,6 +82,7 @@ class ExportStats:
     errors_by_code: dict[str, int] = field(default_factory=dict)
     scan_warning_summary: Optional[str] = None
     redaction_stats: Optional[Any] = None
+    classification_stats: Optional[Any] = None
 
 
 @dataclass(slots=True)
@@ -96,7 +97,6 @@ class RestoreStats:
     errors_by_code: dict[str, int] = field(default_factory=dict)
 
 
-# Replaces SniffResult
 @dataclass(slots=True)
 class ClassificationResult:
     kind: Literal["text", "binary", "error"]
