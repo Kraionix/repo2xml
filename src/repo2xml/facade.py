@@ -73,6 +73,30 @@ class RepoXML:
         reporter = progress or _null_reporter()
         return pipeline.execute(output_stream=output_stream, progress=reporter)
 
+    def filtered_scan(self, root_path: Path) -> List[FileEntry]:
+        """Return a filtered list of FileEntry for dry-run display."""
+        if not isinstance(self.config, ExportConfig):
+            raise FacadeError("filtered_scan requires ExportConfig")
+        config: ExportConfig = self.config
+        root = root_path.resolve()
+        gitignore_engine: IgnoreProvider = GitignoreEngine(
+            root_path=root,
+            user_ignore=config.ignore_patterns,
+            user_include=config.include_patterns,
+        )
+        scanner = FileSystemScanner(
+            root=root,
+            ignore_provider=gitignore_engine,
+            use_gitignore=config.use_gitignore,
+            follow_symlinks_dirs=config.follow_symlinks_dirs,
+            symlinks_files=config.symlinks_files.value,
+            hard_exclude_dirs=set(config.hard_exclude_dirs),
+        )
+        entries = list(scanner.scan())
+        entries = apply_file_filters(entries, config)
+        entries.sort(key=lambda e: e.rel_path)
+        return entries
+
     def export_to_bytes(self, root_path: Path) -> bytes:
         buf = io.BytesIO()
         self.export(root_path, buf)
@@ -98,7 +122,7 @@ class RepoXML:
             return self.restore(fh, output_root)
 
 
-# Backward-compatible alias (can be removed if not needed)
+# Backward-compatible alias
 Repo2XML = RepoXML
 
 

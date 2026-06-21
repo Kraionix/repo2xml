@@ -10,7 +10,8 @@ import typer
 from rich.console import Console
 
 from repo2xml.application.progress import NullProgressReporter, RichProgressReporter
-from repo2xml.cli.reporting import print_breakdown
+from repo2xml.cli.reporting import build_tree, print_breakdown
+from repo2xml.cli.ui import LogLevel
 from repo2xml.config import (
     BinaryMode,
     DecodeErrors,
@@ -22,7 +23,12 @@ from repo2xml.config import (
     RootPathMode,
     SymlinkFilesMode,
 )
-from repo2xml.domain.exceptions import OutputError, Repo2XMLError, SerializationError
+from repo2xml.domain.exceptions import (
+    ConfigurationError,
+    OutputError,
+    Repo2XMLError,
+    SerializationError,
+)
 from repo2xml.facade import RepoXML
 from repo2xml.services.output.targets import (
     ClipboardTarget,
@@ -78,7 +84,7 @@ def execute_export(
     progress: bool,
     report: bool,
     redact: bool,
-    log_level,
+    log_level: LogLevel,
     validate_xml: bool,
     quiet: bool,
     no_color: bool,
@@ -185,7 +191,6 @@ def execute_export(
         try:
             entries = engine.filtered_scan(root)
             if entries:
-                from repo2xml.cli.reporting import build_tree
                 build_tree(entries, console)
             else:
                 console.print("[yellow]No files matched the given filters.[/yellow]")
