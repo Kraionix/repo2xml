@@ -4,166 +4,104 @@ from __future__ import annotations
 import io
 import logging
 from pathlib import Path
-from typing import BinaryIO, Generator, List, Optional
+from typing import BinaryIO, List, Optional, Union
 
-from repo2xml.application.contracts import IngestorLike, ScannerLike, IgnoreProvider
+from repo2xml.application.contracts import IgnoreProvider, IngestorLike, ProgressReporter, ScannerLike
+from repo2xml.application.export_pipeline import ExportPipeline
 from repo2xml.application.filters import apply_file_filters
-from repo2xml.application.pipeline import ExportPipeline
-from repo2xml.application.progress import NullProgressReporter, ProgressReporter
-from repo2xml.config import Repo2XMLConfig
+from repo2xml.application.restore_pipeline import RestorePipeline
+from repo2xml.config import ExportConfig, RestoreConfig
 from repo2xml.domain.exceptions import FacadeError, Repo2XMLError
-from repo2xml.domain.model import ExportStats, FileEntry
+from repo2xml.domain.model import ExportStats, FileEntry, RestoreStats
 from repo2xml.services.ingest.ingestor import StandardIngestor
 from repo2xml.services.scan.gitignore import GitignoreEngine
 from repo2xml.services.scan.scanner import FileSystemScanner
-from repo2xml.services.serialize.base import Serializer
-from repo2xml.services.serialize.factories import create_serializer
+from repo2xml.services.serialize.base import WriteFn
+from repo2xml.services.serialize.factory import get_format_factory
 
 logger = logging.getLogger("repo2xml.facade")
 
 
-class Repo2XML:
-    """
-    High-level library facade for repo2xml.
+class RepoXML:
+    """Unified facade for export and restore operations."""
 
-    This object wires together:
-      - scanner (filesystem + gitignore stack)
-      - ingestor (safe reading + binary detection)
-      - serializer (format-specific output writer)
-      - pipeline (application orchestration)
-    """
-
-    def __init__(
-        self,
-        root_path: Path,
-        config: Repo2XMLConfig,
-        *,
-        scanner: Optional[ScannerLike] = None,
-        ingestor: Optional[IngestorLike] = None,
-        serializer: Optional[Serializer] = None,
-    ):
-        self.root_path = root_path.resolve()
+    def __init__(self, config: Union[ExportConfig, RestoreConfig]):
         self.config = config
 
-        try:
-            # Normalize/validate config early.
-            self.config.normalize()
-            self.config.validate()
-
-            # Automatic binary extension list from root .gitattributes (best-effort)
-            if config.binary_ext_fastpath:
-                self._enrich_binary_extensions_from_gitattributes()
-
-            # Defaults can be overridden for testing or custom integrations.
-            self._gitignore_engine: Optional[IgnoreProvider] = None
-
-            if scanner is None:
-                self._gitignore_engine = GitignoreEngine(
-                    root_path=self.root_path,
-                    user_ignore=self.config.ignore_patterns,
-                    user_include=self.config.include_patterns,
-                )
-
-                scanner = FileSystemScanner(
-                    root=self.root_path,              
-                    ignore_provider=self._gitignore_engine,
-                    use_gitignore=self.config.use_gitignore,
-                    follow_symlinks_dirs=self.config.follow_symlinks_dirs,
-                    symlinks_files=self.config.symlinks_files.value,
-                    hard_exclude_dirs=set(self.config.hard_exclude_dirs),
-                )
-
-            if ingestor is None:
-                ingestor = StandardIngestor(
-                    newline_mode=self.config.newline.value,
-                    decode_errors=self.config.decode_errors.value,
-                    use_ext_fastpath=self.config.binary_ext_fastpath,
-                    binary_ext_add=self.config.binary_ext_add,
-                    binary_ext_remove=self.config.binary_ext_remove,
-                )
-
-            if serializer is None:
-                serializer = create_serializer(
-                    fmt=self.config.format,
-                    formatting=self.config.formatting.value,
-                    include_mtime=self.config.include_mtime,
-                    include_size=self.config.include_size,
-                    text_decode_errors=self.config.decode_errors.value,
-                )
-
-        except Repo2XMLError:
-            raise
-        except Exception as exc:
-            raise FacadeError(f"Failed to initialise Repo2XML: {exc}") from exc
-
-        self._scanner = scanner
-        self._ingestor = ingestor
-        self._serializer = serializer
-
-        self._pipeline = ExportPipeline(
-            root_path=self.root_path,
-            config=self.config,
-            scanner=self._scanner,
-            ingestor=self._ingestor,
-            serializer=self._serializer,
-        )
-
-    def _enrich_binary_extensions_from_gitattributes(self) -> None:
-        ga_path = self.root_path / ".gitattributes"
-        if not ga_path.exists():
-            return
-        try:
-            lines = ga_path.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            return
-        added: set[str] = set()
-        for raw_line in lines:
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            tokens = line.split()
-            if len(tokens) < 2:
-                continue
-            pattern, *attrs = tokens
-            if "binary" not in attrs:
-                continue
-            if pattern.startswith("*.") and "/" not in pattern:
-                ext = pattern[1:]
-                if ext not in self.config.binary_ext_add:
-                    added.add(ext.lower())
-        if added:
-            self.config.binary_ext_add.extend(sorted(added))
-            logger.info(
-                "Added %d binary extensions from %s: %s",
-                len(added),
-                ga_path,
-                ", ".join(sorted(added)),
-            )
-
-    def scan(self) -> Generator[FileEntry, None, None]:
-        yield from self._scanner.scan()
-
-    def filtered_scan(self) -> List[FileEntry]:
-        entries = list(self._scanner.scan())
-        entries = apply_file_filters(entries, self.config)
-        entries.sort(key=lambda e: e.rel_path)
-        return entries
+    # ---- Export API ----
 
     def export(
         self,
+        root_path: Path,
         output_stream: BinaryIO,
         *,
         progress: Optional[ProgressReporter] = None,
     ) -> ExportStats:
-        reporter = progress or NullProgressReporter()
-        return self._pipeline.execute(output_stream=output_stream, progress=reporter)
+        if not isinstance(self.config, ExportConfig):
+            raise FacadeError("Export operation requires ExportConfig")
+        config: ExportConfig = self.config
+        root = root_path.resolve()
 
-    def export_to_bytes(self) -> bytes:
+        # Build scanner and ingestor
+        gitignore_engine: IgnoreProvider = GitignoreEngine(
+            root_path=root,
+            user_ignore=config.ignore_patterns,
+            user_include=config.include_patterns,
+        )
+        scanner = FileSystemScanner(
+            root=root,
+            ignore_provider=gitignore_engine,
+            use_gitignore=config.use_gitignore,
+            follow_symlinks_dirs=config.follow_symlinks_dirs,
+            symlinks_files=config.symlinks_files.value,
+            hard_exclude_dirs=set(config.hard_exclude_dirs),
+        )
+        ingestor = StandardIngestor(
+            newline_mode=config.newline.value,
+            decode_errors=config.decode_errors.value,
+            use_ext_fastpath=config.binary_ext_fastpath,
+            binary_ext_add=config.binary_ext_add,
+            binary_ext_remove=config.binary_ext_remove,
+        )
+
+        pipeline = ExportPipeline(
+            root_path=root,
+            config=config,
+            scanner=scanner,
+            ingestor=ingestor,
+        )
+        reporter = progress or _null_reporter()
+        return pipeline.execute(output_stream=output_stream, progress=reporter)
+
+    def export_to_bytes(self, root_path: Path) -> bytes:
         buf = io.BytesIO()
-        self.export(buf)
+        self.export(root_path, buf)
         return buf.getvalue()
 
-    def export_to_bytes_with_stats(self) -> tuple[bytes, ExportStats]:
-        buf = io.BytesIO()
-        stats = self.export(buf)
-        return buf.getvalue(), stats
+    # ---- Restore API ----
+
+    def restore(
+        self,
+        input_stream: BinaryIO,
+        output_root: Path,
+        *,
+        progress: Optional[ProgressReporter] = None,
+    ) -> RestoreStats:
+        if not isinstance(self.config, RestoreConfig):
+            raise FacadeError("Restore operation requires RestoreConfig")
+        pipeline = RestorePipeline(self.config)
+        reporter = progress or _null_reporter()
+        return pipeline.execute(input_stream, output_root, reporter)
+
+    def restore_from_path(self, xml_path: Path, output_root: Path) -> RestoreStats:
+        with open(xml_path, "rb") as fh:
+            return self.restore(fh, output_root)
+
+
+# Backward-compatible alias (can be removed if not needed)
+Repo2XML = RepoXML
+
+
+def _null_reporter() -> ProgressReporter:
+    from repo2xml.application.progress import NullProgressReporter
+    return NullProgressReporter()

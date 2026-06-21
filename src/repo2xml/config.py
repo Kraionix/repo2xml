@@ -52,7 +52,7 @@ TextProcessor = Callable[[str], str]
 
 
 @dataclass(slots=True)
-class Repo2XMLConfig:
+class ExportConfig:
     format: str = "xml"
     mode: Mode = Mode.full
     formatting: Formatting = Formatting.compact
@@ -110,13 +110,24 @@ class Repo2XMLConfig:
             raise ConfigurationError("min_file_size must be <= max_file_size")
         if not self.format:
             raise ConfigurationError("format must not be empty")
-
-        # --include patterns must not begin with '!' because they are automatically
-        # negated when building the gitignore rules. A leading '!' would cause a
-        # double negation, leading to confusing behaviour.
         for pat in self.include_patterns:
             if pat.startswith("!"):
                 raise ConfigurationError(
-                    f"Include pattern '{pat}' must not start with '!'. "
-                    "Include patterns are automatically treated as un-ignore rules."
+                    f"Include pattern '{pat}' must not start with '!'."
                 )
+
+
+@dataclass(slots=True)
+class RestoreConfig:
+    format: str = "xml"
+    overwrite: bool = False
+    restore_mtime: bool = True
+    create_empty_for_missing: bool = False
+    # filter options could be added later
+
+    def normalize(self) -> None:
+        self.format = (self.format or "xml").strip().lower()
+
+    def validate(self) -> None:
+        if not self.format:
+            raise ConfigurationError("format must not be empty")

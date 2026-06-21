@@ -1,21 +1,17 @@
+# src/repo2xml/domain/model.py
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Iterable, Literal, Optional, Union
+from typing import Iterable, Iterator, List, Literal, Optional, Union
 
 
 @dataclass(slots=True)
 class FileEntry:
-    """
-    A single file discovered during scanning.
-
-    - abs_path: absolute filesystem path used for reading
-    - rel_path: repository-relative POSIX path used in output and filtering
-    """
+    """A single file discovered during scanning or described in a parsed document."""
     abs_path: Path
-    rel_path: str
+    rel_path: str          # repository-relative POSIX path
     name: str
     size: int
     mtime_ns: int
@@ -24,22 +20,27 @@ class FileEntry:
 
     @property
     def ext(self) -> str:
-        """Joined suffixes (e.g. '.tar.gz')."""
-        # Use the basename only (faster and semantically correct for extensions).
         return "".join(Path(self.name).suffixes)
 
 
 @dataclass(slots=True)
 class ExportMeta:
-    """Document-level metadata."""
+    """Document-level metadata emitted by an export."""
     root_path: str
     generated_at_utc: Optional[str]
     tool_version: str
     schema_version: str
 
 
+@dataclass(slots=True)
+class RestoreMeta:
+    """Metadata about a restore operation."""
+    target_root: str               # absolute path where the repository is restored
+    restored_at_utc: str           # ISO-8601 timestamp of the restore
+    source_document: Optional[str] # optional identifier of the source XML
+
+
 class SkipCode(str, Enum):
-    """Machine-readable reasons for intentionally skipping file content."""
     binary_skip_mode = "binary_skip_mode"
     text_size_limit = "text_size_limit"
     base64_size_limit = "base64_size_limit"
@@ -48,7 +49,6 @@ class SkipCode(str, Enum):
 
 
 class ErrorCode(str, Enum):
-    """Machine-readable reasons for failed processing attempts."""
     sniff_read_error = "sniff_read_error"
     stat_error = "stat_error"
     text_read_error = "text_read_error"
@@ -62,47 +62,41 @@ class ErrorCode(str, Enum):
 
 @dataclass(slots=True)
 class SkipInfo:
-    """
-    Structured skip information produced by low-level components.
-
-    The pipeline is responsible for turning this into a user-facing message.
-    """
     code: SkipCode
     detail: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
 class ErrorInfo:
-    """
-    Structured error information produced by low-level components.
-
-    The pipeline is responsible for turning this into a user-facing message.
-    """
     code: ErrorCode
     detail: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
 class ExportStats:
-    """Execution statistics with cause breakdown."""
     files_total: int
     files_emitted: int
     files_skipped: int
     files_errors: int
-
     skipped_by_code: dict[str, int] = field(default_factory=dict)
     errors_by_code: dict[str, int] = field(default_factory=dict)
-
     scan_warning_summary: Optional[str] = None
 
 
 @dataclass(slots=True)
-class SniffResult:
-    """
-    Lightweight classification result for a file.
+class RestoreStats:
+    files_total: int
+    files_created: int
+    files_skipped: int
+    files_errors: int
+    dirs_created: int
+    symlinks_created: int
+    skipped_by_code: dict[str, int] = field(default_factory=dict)
+    errors_by_code: dict[str, int] = field(default_factory=dict)
 
-    This is intentionally small and cheap: it should not read full file content.
-    """
+
+@dataclass(slots=True)
+class SniffResult:
     kind: Literal["text", "binary", "error"]
     encoding: Optional[str] = None
     error: Optional[ErrorInfo] = None
@@ -110,7 +104,6 @@ class SniffResult:
 
 @dataclass(slots=True)
 class TextReadResult:
-    """Result of a bounded text read."""
     kind: Literal["text", "skip", "error"]
     text: Optional[str] = None
     encoding: Optional[str] = None
@@ -118,66 +111,41 @@ class TextReadResult:
     error: Optional[ErrorInfo] = None
 
 
-# Payloads represent how a file should be emitted by a serializer.
-# This keeps serializers independent from scanning/ingestion policy switches.
-
+# ---- Payload hierarchy (sealed) ----
 
 @dataclass(slots=True)
 class MetadataPayload:
-    """
-    Emit metadata only (no content).
-
-    Semantics:
-    - This is NOT an error and NOT "skipped".
-    - Serializers should output a normal file entry without <content>.
-    """
+    """File entry with metadata only, no content."""
 
 
 @dataclass(slots=True)
 class LinkPayload:
-    """
-    Emit link metadata only (symlink-as-link mode).
-
-    Semantics:
-    - This is NOT an error and NOT "skipped".
-    - Serializers should include link target info when available.
-    """
+    """Symlink entry."""
     link_target: Optional[str] = None
 
 
 @dataclass(slots=True)
 class TextPayload:
-    """Emit decoded text content."""
+    """Decoded text content."""
     text: str
     encoding: Optional[str] = None
 
 
 @dataclass(slots=True)
 class BinaryHashPayload:
-    """Emit a hash summary for binary content."""
+    """Hash of binary content; original bytes not available."""
     sha256_hex: str
 
 
 @dataclass(slots=True)
 class BinaryBase64Payload:
-    """
-    Emit base64 for binary content.
-
-    The payload contains an iterable of base64 chunks (ASCII strings).
-    Serializers may stream them directly.
-    """
+    """Binary content encoded as an iterable of base64 chunks (ASCII strings)."""
     chunks: Iterable[str]
 
 
 @dataclass(slots=True)
 class SkippedPayload:
-    """
-    Emit a skipped marker with a human-readable reason.
-
-    Semantics:
-    - This is an intentional omission (size limits, binary skip mode, etc.).
-    - Serializers should mark the entry as skipped.
-    """
+    """Intentionally omitted file (e.g., size limit)."""
     code: SkipCode
     message: str
     detail: dict[str, object] = field(default_factory=dict)
@@ -185,13 +153,7 @@ class SkippedPayload:
 
 @dataclass(slots=True)
 class ErrorPayload:
-    """
-    Emit an error marker with a human-readable message.
-
-    Semantics:
-    - This is a failed attempt to process a file (read/decode/hash errors, etc.).
-    - Serializers should mark the entry as skipped/error.
-    """
+    """Processing error."""
     code: ErrorCode
     message: str
     detail: dict[str, object] = field(default_factory=dict)
@@ -206,3 +168,20 @@ FilePayload = Union[
     SkippedPayload,
     ErrorPayload,
 ]
+
+
+# ---- Restore-specific structures ----
+
+@dataclass(slots=True)
+class RestoreEntry:
+    """Pair of file metadata and its payload to be restored."""
+    entry: FileEntry
+    payload: FilePayload
+
+
+@dataclass(slots=True)
+class ParsedRepository:
+    """Result of deserialising an export document."""
+    meta: ExportMeta
+    structure: List[FileEntry]      # ordered tree as in <project_structure>
+    files: Iterator[RestoreEntry]   # lazy stream of file payloads
