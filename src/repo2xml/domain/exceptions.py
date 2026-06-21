@@ -10,6 +10,10 @@ class ConfigurationError(Repo2XMLError):
     """Invalid configuration."""
 
 
+class FacadeError(Repo2XMLError):
+    """Error during facade initialisation or wiring."""
+
+
 class OutputError(Repo2XMLError):
     """Cannot open/write to the selected output target."""
 
