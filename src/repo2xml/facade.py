@@ -14,9 +14,10 @@ from repo2xml.config import ExportConfig, RestoreConfig
 from repo2xml.domain.exceptions import FacadeError, Repo2XMLError
 from repo2xml.domain.model import ExportStats, FileEntry, RestoreStats
 from repo2xml.services.ingest.ingestor import StandardIngestor
+from repo2xml.services.ingest.classify import ClassificationEngine
+from repo2xml.services.ingest.redact import RedactionEngine
 from repo2xml.services.scan.gitignore import GitignoreEngine
 from repo2xml.services.scan.registry import create_scanner
-from repo2xml.services.serialize.factory import get_format_factory
 
 logger = logging.getLogger("repo2xml.facade")
 
@@ -61,15 +62,15 @@ class RepoXML:
         ingestor = StandardIngestor(
             newline_mode=config.newline.value,
             decode_errors=config.decode_errors.value,
-            use_ext_fastpath=config.binary_ext_fastpath,
-            binary_ext_add=config.binary_ext_add,
-            binary_ext_remove=config.binary_ext_remove,
         )
 
-        # Create RedactionEngine if redaction is enabled
+        classification_engine = ClassificationEngine(
+            root,
+            config_path=config.classify_config_path,
+        )
+
         redaction_engine = None
         if config.redact:
-            from repo2xml.services.ingest.redact import RedactionEngine
             redaction_engine = RedactionEngine(
                 root_path=root,
                 config_path=config.redact_config_path,
@@ -80,12 +81,14 @@ class RepoXML:
             config=config,
             scanner=scanner,
             ingestor=ingestor,
+            classification_engine=classification_engine,
             redaction_engine=redaction_engine,
         )
         reporter = progress or _null_reporter()
         return pipeline.execute(output_stream=output_stream, progress=reporter)
 
     def filtered_scan(self, root_path: Path) -> List[FileEntry]:
+        """Return a filtered list of FileEntry for dry-run display."""
         if not isinstance(self.config, ExportConfig):
             raise FacadeError("filtered_scan requires ExportConfig")
         config: ExportConfig = self.config
@@ -138,6 +141,7 @@ class RepoXML:
             return self.restore(fh, output_root)
 
 
+# Backward-compatible alias
 Repo2XML = RepoXML
 
 

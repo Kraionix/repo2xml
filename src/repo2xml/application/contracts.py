@@ -13,14 +13,13 @@ from repo2xml.domain.model import (
     RestoreEntry,
     RestoreMeta,
     RestoreStats,
-    SniffResult,
     TextReadResult,
 )
 from repo2xml.services.scan.gitignore import IgnoreRuleset
 
 
 # ----------------------------------------------------------------------
-# Existing infrastructure contracts (unchanged)
+# Existing infrastructure contracts
 # ----------------------------------------------------------------------
 
 class ScanStatsLike(Protocol):
@@ -34,8 +33,8 @@ class ScannerLike(Protocol):
 
 
 class IngestorLike(Protocol):
-    def sniff(self, path: Path) -> SniffResult: ...
-    def read_text(self, path: Path, *, max_size: int) -> TextReadResult: ...
+    """Reduced ingestor interface – classification is handled externally."""
+    def read_text(self, path: Path, *, max_size: int, sniff_sample: Optional[bytes] = None) -> TextReadResult: ...
     def sha256_file(self, path: Path, *, chunk_size: int = 1024 * 64) -> str: ...
     def iter_base64_chunks(self, path: Path, *, chunk_size: int = 1024 * 64) -> Iterable[str]: ...
 
@@ -105,16 +104,13 @@ class Deserializer(ABC):
         Read the stream and return a structured representation.
 
         If `strict` is True, implementations should perform rigorous
-        structural validation (e.g., presence of required elements,
-        path safety checks, schema version checks) and raise
-        DeserializationError on any violation.
+        structural validation and raise DeserializationError on any violation.
         """
         ...
 
-    # Optionally, a format can advertise which payload types it can reconstruct.
     @classmethod
     def supported_payload_types(cls) -> Set[Type[FilePayload]]:
-        return set()  # default: unknown
+        return set()
 
 
 # ---- Format factory ----

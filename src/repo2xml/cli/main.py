@@ -38,9 +38,6 @@ def main(
     no_mtime: bool = typer.Option(False, "--no-mtime", help="Do not emit mtime_utc."),
     no_size: bool = typer.Option(False, "--no-size", help="Do not emit size attributes."),
     root_path_mode: RootPathMode = typer.Option(RootPathMode.absolute, "--root-path-mode", help="How to represent <root_path>."),
-    ext_binary_detect: bool = typer.Option(True, "--ext-binary-detect/--no-ext-binary-detect", help="Fast-path binary detection by extension."),
-    binary_ext_add: Optional[List[str]] = typer.Option(None, "--binary-ext-add", help="Extra binary extensions."),
-    binary_ext_remove: Optional[List[str]] = typer.Option(None, "--binary-ext-remove", help="Remove extensions from binary set."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show filtered project tree without generating output."),
     progress: bool = typer.Option(True, "--progress/--no-progress", help="Show progress bars."),
     report: bool = typer.Option(False, "--report/--no-report", help="Print detailed skip/error breakdown."),
@@ -63,21 +60,10 @@ def main(
     binary: BinaryMode = typer.Option(BinaryMode.skip, "--binary", help="How to handle binary files."),
     newline: NewlineMode = typer.Option(NewlineMode.preserve, "--newline", help="Newline normalization."),
     decode_errors: DecodeErrors = typer.Option(DecodeErrors.replace, "--decode-errors", help="Text decoding errors policy."),
-    source: str = typer.Option("filesystem", "--source", help="Scanner source (e.g., 'filesystem')."),
-    source_option: Optional[List[str]] = typer.Option(
-        None,
-        "--source-option",
-        help="Extra key=value pairs for the scanner. Can be repeated.",
-    ),
-    redact_config: Optional[Path] = typer.Option(
-        None,
-        "--redact-config",
-        help="Path to YAML file with redaction rules.",
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        resolve_path=True,
-    ),
+    source: str = typer.Option("filesystem", "--source", help="Scanner source."),
+    source_option: Optional[List[str]] = typer.Option(None, "--source-option", help="Extra key=value pairs for the scanner."),
+    redact_config: Optional[Path] = typer.Option(None, "--redact-config", help="Path to YAML file with redaction rules.", exists=True, file_okay=True, dir_okay=False, resolve_path=True),
+    classify_config: Optional[Path] = typer.Option(None, "--classify-config", help="Path to YAML file with classification rules.", exists=True, file_okay=True, dir_okay=False, resolve_path=True),
 ) -> None:
     """repo2xml: convert a repository into a single context document for LLM ingestion."""
     console = Console(no_color=no_color)
@@ -97,9 +83,6 @@ def main(
         no_mtime=no_mtime,
         no_size=no_size,
         root_path_mode=root_path_mode,
-        ext_binary_detect=ext_binary_detect,
-        binary_ext_add=binary_ext_add,
-        binary_ext_remove=binary_ext_remove,
         dry_run=dry_run,
         progress=progress,
         report=report,
@@ -125,6 +108,7 @@ def main(
         source=source,
         source_option=source_option,
         redact_config=redact_config,
+        classify_config=classify_config,
     )
 
 
@@ -138,11 +122,7 @@ def restore(
     report: bool = typer.Option(False, "--report", help="Print detailed report."),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress non-error output."),
     no_color: bool = typer.Option(False, "--no-color", help="Disable colored output."),
-    no_strict_validation: bool = typer.Option(
-        False,
-        "--no-strict-validation",
-        help="Skip strict XML validation before restoration (use only for recovery).",
-    ),
+    no_strict_validation: bool = typer.Option(False, "--no-strict-validation", help="Skip strict XML validation before restoration."),
 ) -> None:
     """Restore a repository from a repo2xml XML export."""
     console = Console(no_color=no_color)

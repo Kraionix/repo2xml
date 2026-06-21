@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from repo2xml.domain.exceptions import ConfigurationError
 
@@ -48,9 +48,6 @@ class RootPathMode(str, Enum):
     redact = "redact"
 
 
-TextProcessor = Callable[[str], str]  # kept for potential external use, but no longer used internally
-
-
 @dataclass(slots=True)
 class ExportConfig:
     format: str = "xml"
@@ -63,9 +60,6 @@ class ExportConfig:
     root_path_mode: RootPathMode = RootPathMode.absolute
     include_mtime: bool = True
     include_size: bool = True
-    binary_ext_fastpath: bool = True
-    binary_ext_add: List[str] = field(default_factory=list)
-    binary_ext_remove: List[str] = field(default_factory=list)
     use_gitignore: bool = True
     ignore_patterns: List[str] = field(default_factory=list)
     include_patterns: List[str] = field(default_factory=list)
@@ -77,7 +71,6 @@ class ExportConfig:
     max_hash_size: int = 0
     write_buffer_chars: int = 64_000
     report: bool = False
-    # text_processors removed – redaction is now handled directly by the pipeline
     min_file_size: int = 0
     max_file_size: int = 0
     newer_than: Optional[float] = None
@@ -86,6 +79,7 @@ class ExportConfig:
     source_options: Dict[str, Any] = field(default_factory=dict)
     redact: bool = False
     redact_config_path: Optional[Path] = None
+    classify_config_path: Optional[Path] = None   # Optional user YAML for classification
 
     def normalize(self) -> None:
         self.format = (self.format or "xml").strip().lower()
@@ -117,15 +111,11 @@ class ExportConfig:
             raise ConfigurationError("format must not be empty")
         for pat in self.include_patterns:
             if pat.startswith("!"):
-                raise ConfigurationError(
-                    f"Include pattern '{pat}' must not start with '!'."
-                )
+                raise ConfigurationError(f"Include pattern '{pat}' must not start with '!'.")
         if not self.source:
             raise ConfigurationError("source must not be empty")
-        if self.redact_config_path is not None and not self.redact_config_path.is_file():
-            raise ConfigurationError(
-                f"Redact config file does not exist: {self.redact_config_path}"
-            )
+        if self.classify_config_path is not None and not self.classify_config_path.is_file():
+            raise ConfigurationError(f"Classify config file does not exist: {self.classify_config_path}")
 
 
 @dataclass(slots=True)

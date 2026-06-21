@@ -35,9 +35,9 @@ class ExportMeta:
 @dataclass(slots=True)
 class RestoreMeta:
     """Metadata about a restore operation."""
-    target_root: str               # absolute path where the repository is restored
-    restored_at_utc: str           # ISO-8601 timestamp of the restore
-    source_document: Optional[str] # optional identifier of the source XML
+    target_root: str
+    restored_at_utc: str
+    source_document: Optional[str]
 
 
 class SkipCode(str, Enum):
@@ -81,7 +81,6 @@ class ExportStats:
     skipped_by_code: dict[str, int] = field(default_factory=dict)
     errors_by_code: dict[str, int] = field(default_factory=dict)
     scan_warning_summary: Optional[str] = None
-    # New field for redaction statistics (avoid heavy coupling with services)
     redaction_stats: Optional[Any] = None
 
 
@@ -97,11 +96,13 @@ class RestoreStats:
     errors_by_code: dict[str, int] = field(default_factory=dict)
 
 
+# Replaces SniffResult
 @dataclass(slots=True)
-class SniffResult:
+class ClassificationResult:
     kind: Literal["text", "binary", "error"]
     encoding: Optional[str] = None
-    error: Optional[ErrorInfo] = None
+    sample: Optional[bytes] = None
+    error: Optional[str] = None
 
 
 @dataclass(slots=True)
@@ -113,7 +114,7 @@ class TextReadResult:
     error: Optional[ErrorInfo] = None
 
 
-# ---- Payload hierarchy (sealed) ----
+# ---- Payload hierarchy ----
 
 @dataclass(slots=True)
 class MetadataPayload:
@@ -135,19 +136,18 @@ class TextPayload:
 
 @dataclass(slots=True)
 class BinaryHashPayload:
-    """Hash of binary content; original bytes not available."""
+    """Hash of binary content."""
     sha256_hex: str
 
 
 @dataclass(slots=True)
 class BinaryBase64Payload:
-    """Binary content encoded as an iterable of base64 chunks (ASCII strings)."""
+    """Binary content encoded as base64 chunks."""
     chunks: Iterable[str]
 
 
 @dataclass(slots=True)
 class SkippedPayload:
-    """Intentionally omitted file (e.g., size limit)."""
     code: SkipCode
     message: str
     detail: dict[str, object] = field(default_factory=dict)
@@ -155,7 +155,6 @@ class SkippedPayload:
 
 @dataclass(slots=True)
 class ErrorPayload:
-    """Processing error."""
     code: ErrorCode
     message: str
     detail: dict[str, object] = field(default_factory=dict)
@@ -176,14 +175,12 @@ FilePayload = Union[
 
 @dataclass(slots=True)
 class RestoreEntry:
-    """Pair of file metadata and its payload to be restored."""
     entry: FileEntry
     payload: FilePayload
 
 
 @dataclass(slots=True)
 class ParsedRepository:
-    """Result of deserialising an export document."""
     meta: ExportMeta
-    structure: List[FileEntry]      # ordered tree as in <project_structure>
-    files: Iterator[RestoreEntry]   # lazy stream of file payloads
+    structure: List[FileEntry]
+    files: Iterator[RestoreEntry]

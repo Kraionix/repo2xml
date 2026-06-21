@@ -43,14 +43,16 @@ class ExportPipeline:
         config: ExportConfig,
         scanner: ScannerLike,
         ingestor: IngestorLike,
-        redaction_engine=None,  # New parameter
+        classification_engine=None,
+        redaction_engine=None,
     ):
         self.root_path = root_path.resolve()
         self.config = config
         self.scanner = scanner
         self.ingestor = ingestor
-        self._payloads = ExportPayloadBuilder(config=self.config, ingestor=self.ingestor)
+        self._classification_engine = classification_engine
         self._redaction_engine = redaction_engine
+        self._payloads = ExportPayloadBuilder(config=self.config, ingestor=self.ingestor)
 
         factory = get_format_factory(config.format)
         self.serializer = factory.create_serializer(
@@ -146,9 +148,15 @@ class ExportPipeline:
             errors_by: dict[str, int] = {}
 
             for entry in entries:
-                payload = self._payloads.build(entry)
+                # Classify the file (text/binary/error)
+                if self._classification_engine:
+                    classification = self._classification_engine.classify(entry)
+                else:
+                    # Fallback (should not happen)
+                    classification = None
+                payload = self._payloads.build(entry, classification)
 
-                # --- Redaction step ---
+                # Apply secret redaction to text payloads
                 if isinstance(payload, TextPayload) and self._redaction_engine:
                     new_text = self._redaction_engine.process(entry, payload.text)
                     payload = TextPayload(text=new_text, encoding=payload.encoding)
@@ -182,10 +190,9 @@ class ExportPipeline:
                 errors_by_code=errors_by,
                 scan_warning_summary=scan_warn,
             )
-            # Attach redaction statistics if available
             if self._redaction_engine:
                 stats.redaction_stats = self._redaction_engine.get_stats()
-
+            # Classification stats could be attached here if desired
             return stats
 
         finally:
@@ -199,7 +206,6 @@ class ExportPipeline:
                 pass
 
     def _dispatch_payload(self, entry: FileEntry, payload: FilePayload, write: WriteFn) -> None:
-        """Manual dispatch to avoid dynamic lookup and ensure exhaustiveness."""
         if isinstance(payload, MetadataPayload):
             self.serializer.write_metadata(entry, payload, write)
         elif isinstance(payload, TextPayload):

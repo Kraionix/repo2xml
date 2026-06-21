@@ -9,6 +9,7 @@ from repo2xml.config import BinaryMode, ExportConfig, Mode, SymlinkFilesMode
 from repo2xml.domain.model import (
     BinaryBase64Payload,
     BinaryHashPayload,
+    ClassificationResult,
     ErrorCode,
     ErrorInfo,
     ErrorPayload,
@@ -99,7 +100,7 @@ class BinaryPolicy:
     config: ExportConfig
     ingestor: IngestorLike
 
-    def apply(self, entry: FileEntry) -> Optional[FilePayload]:
+    def apply(self, entry: FileEntry) -> FilePayload:
         if self.config.binary == BinaryMode.skip:
             info = SkipInfo(code=SkipCode.binary_skip_mode)
             return SkippedPayload(code=info.code, message=ReasonFormatter.format_skip(info), detail=info.detail)
@@ -134,12 +135,16 @@ class TextPolicy:
     config: ExportConfig
     ingestor: IngestorLike
 
-    def apply(self, entry: FileEntry, *, encoding_hint: Optional[str]) -> FilePayload:
+    def apply(self, entry: FileEntry, classification: ClassificationResult) -> FilePayload:
         if entry.size > self.config.max_text_size:
             info = SkipInfo(code=SkipCode.text_size_limit,
                             detail={"size": entry.size, "limit": self.config.max_text_size})
             return SkippedPayload(code=info.code, message=ReasonFormatter.format_skip(info), detail=info.detail)
-        res = self.ingestor.read_text(entry.abs_path, max_size=self.config.max_text_size)
+        res = self.ingestor.read_text(
+            entry.abs_path,
+            max_size=self.config.max_text_size,
+            sniff_sample=classification.sample,
+        )
         if res.kind == "error":
             err = res.error or ErrorInfo(code=ErrorCode.unknown)
             return ErrorPayload(code=err.code, message=ReasonFormatter.format_error(err), detail=err.detail)
@@ -147,8 +152,7 @@ class TextPolicy:
             info = res.skipped or SkipInfo(code=SkipCode.unknown)
             return SkippedPayload(code=info.code, message=ReasonFormatter.format_skip(info), detail=info.detail)
         text = res.text or ""
-        # Text processors are no longer applied here; redaction is handled later in the pipeline.
-        return TextPayload(text=text, encoding=res.encoding or encoding_hint)
+        return TextPayload(text=text, encoding=res.encoding or classification.encoding)
 
 
 @dataclass(slots=True)
@@ -166,17 +170,16 @@ class ExportPayloadBuilder:
         self._binary = BinaryPolicy(self.config, self.ingestor)
         self._text = TextPolicy(self.config, self.ingestor)
 
-    def build(self, entry: FileEntry) -> FilePayload:
+    def build(self, entry: FileEntry, classification: ClassificationResult) -> FilePayload:
         p = self._symlink.apply(entry)
         if p is not None:
             return p
         p = self._mode.apply(entry)
         if p is not None:
             return p
-        sniff = self.ingestor.sniff(entry.abs_path)
-        if sniff.kind == "error":
-            err = sniff.error or ErrorInfo(code=ErrorCode.unknown)
+        if classification.kind == "error":
+            err = ErrorInfo(code=ErrorCode.sniff_read_error, detail={"os_error": classification.error or "unknown"})
             return ErrorPayload(code=err.code, message=ReasonFormatter.format_error(err), detail=err.detail)
-        if sniff.kind == "binary":
+        if classification.kind == "binary":
             return self._binary.apply(entry)
-        return self._text.apply(entry, encoding_hint=sniff.encoding)
+        return self._text.apply(entry, classification)

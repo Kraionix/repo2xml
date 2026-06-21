@@ -78,9 +78,6 @@ def execute_export(
     no_mtime: bool,
     no_size: bool,
     root_path_mode: RootPathMode,
-    ext_binary_detect: bool,
-    binary_ext_add: Optional[list[str]],
-    binary_ext_remove: Optional[list[str]],
     dry_run: bool,
     progress: bool,
     report: bool,
@@ -103,9 +100,10 @@ def execute_export(
     binary: BinaryMode,
     newline: NewlineMode,
     decode_errors: DecodeErrors,
-    source: str = "filesystem",
-    source_option: Optional[list[str]] = None,
-    redact_config: Optional[Path] = None,
+    source: str,
+    source_option: Optional[list[str]],
+    redact_config: Optional[Path],
+    classify_config: Optional[Path],
 ) -> None:
     """Run the full repo2xml export workflow."""
     if version:
@@ -168,9 +166,6 @@ def execute_export(
             root_path_mode=root_path_mode,
             include_mtime=not no_mtime,
             include_size=not no_size,
-            binary_ext_fastpath=ext_binary_detect,
-            binary_ext_add=list(binary_ext_add) if binary_ext_add else [],
-            binary_ext_remove=list(binary_ext_remove) if binary_ext_remove else [],
             use_gitignore=gitignore,
             ignore_patterns=user_ignore,
             include_patterns=list(include) if include else [],
@@ -189,6 +184,7 @@ def execute_export(
             source_options=source_opts,
             redact=redact,
             redact_config_path=redact_config,
+            classify_config_path=classify_config,
         )
         config.normalize()
         config.validate()
@@ -250,7 +246,6 @@ def execute_export(
             print_breakdown("Skipped by cause", stats.skipped_by_code, console)
             print_breakdown("Errors by cause", stats.errors_by_code, console)
 
-            # --- Redaction statistics ---
             if stats.redaction_stats:
                 rs = stats.redaction_stats
                 table = Table(title="Redaction Statistics", show_header=True, header_style="bold")
