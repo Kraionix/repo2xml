@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Iterable, Iterator, List, Literal, Optional, Union
+from typing import Iterable, Iterator, List, Literal, Optional, Union, Any
 
 
 @dataclass(slots=True)
@@ -81,6 +81,8 @@ class ExportStats:
     skipped_by_code: dict[str, int] = field(default_factory=dict)
     errors_by_code: dict[str, int] = field(default_factory=dict)
     scan_warning_summary: Optional[str] = None
+    # New field for redaction statistics (avoid heavy coupling with services)
+    redaction_stats: Optional[Any] = None
 
 
 @dataclass(slots=True)

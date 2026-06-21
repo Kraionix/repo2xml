@@ -48,7 +48,7 @@ class RootPathMode(str, Enum):
     redact = "redact"
 
 
-TextProcessor = Callable[[str], str]
+TextProcessor = Callable[[str], str]  # kept for potential external use, but no longer used internally
 
 
 @dataclass(slots=True)
@@ -77,13 +77,14 @@ class ExportConfig:
     max_hash_size: int = 0
     write_buffer_chars: int = 64_000
     report: bool = False
-    text_processors: List[TextProcessor] = field(default_factory=list)
+    # text_processors removed – redaction is now handled directly by the pipeline
     min_file_size: int = 0
     max_file_size: int = 0
     newer_than: Optional[float] = None
     older_than: Optional[float] = None
     source: str = "filesystem"
     source_options: Dict[str, Any] = field(default_factory=dict)
+    redact: bool = False
     redact_config_path: Optional[Path] = None
 
     def normalize(self) -> None:
@@ -121,11 +122,10 @@ class ExportConfig:
                 )
         if not self.source:
             raise ConfigurationError("source must not be empty")
-        if self.redact_config_path is not None:
-            if not self.redact_config_path.is_file():
-                raise ConfigurationError(
-                    f"Redact config file does not exist: {self.redact_config_path}"
-                )
+        if self.redact_config_path is not None and not self.redact_config_path.is_file():
+            raise ConfigurationError(
+                f"Redact config file does not exist: {self.redact_config_path}"
+            )
 
 
 @dataclass(slots=True)

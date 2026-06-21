@@ -8,6 +8,7 @@ from typing import Optional
 
 import typer
 from rich.console import Console
+from rich.table import Table
 
 from repo2xml.application.progress import NullProgressReporter, RichProgressReporter
 from repo2xml.cli.reporting import build_tree, print_breakdown
@@ -145,18 +146,6 @@ def execute_export(
     if older_than:
         older_ts = parse_datetime_arg(older_than)
 
-    # Build text processors list
-    text_processors = []
-    if redact:
-        from repo2xml.services.ingest.redact_engine import RedactionEngine
-        try:
-            engine = RedactionEngine(config_path=redact_config, root_path=root)
-        except ConfigurationError as e:
-            logger.error("Redaction setup failed: %s", e)
-            raise typer.Exit(code=2)
-        text_processors.append(engine)
-
-    # Parse --source-option key=value pairs into a dict
     source_opts = {}
     if source_option:
         for item in source_option:
@@ -192,13 +181,13 @@ def execute_export(
             max_base64_size=max_size,
             max_hash_size=0,
             report=report,
-            text_processors=text_processors,
             min_file_size=size_min,
             max_file_size=size_max,
             newer_than=newer_ts,
             older_than=older_ts,
             source=source,
             source_options=source_opts,
+            redact=redact,
             redact_config_path=redact_config,
         )
         config.normalize()
@@ -260,6 +249,22 @@ def execute_export(
         if report:
             print_breakdown("Skipped by cause", stats.skipped_by_code, console)
             print_breakdown("Errors by cause", stats.errors_by_code, console)
+
+            # --- Redaction statistics ---
+            if stats.redaction_stats:
+                rs = stats.redaction_stats
+                table = Table(title="Redaction Statistics", show_header=True, header_style="bold")
+                table.add_column("Metric", style="dim")
+                table.add_column("Value", justify="right")
+                table.add_row("Files processed", str(rs.total_files_processed))
+                table.add_row("Files skipped", str(rs.total_files_skipped))
+                table.add_row("Total matches", str(rs.total_matches))
+                if rs.matches_by_rule:
+                    table.add_section()
+                    table.add_row("Matches by rule", "")
+                    for rule_name, count in sorted(rs.matches_by_rule.items(), key=lambda x: -x[1]):
+                        table.add_row(f"  {rule_name}", str(count))
+                console.print(table)
 
         if validate_xml:
             xml_path = out_abs

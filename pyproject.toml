@@ -26,9 +26,7 @@ dev = [
   "mypy>=1.10.0",
   "pytest>=8.0.0",
 ]
-redact-yaml = [
-  # No longer optional; kept for backward compatibility but empty.
-]
+# redact-yaml extra kept empty for backward compatibility; pyyaml is now required
 
 [project.scripts]
 repo2xml = "repo2xml.cli.main:app"

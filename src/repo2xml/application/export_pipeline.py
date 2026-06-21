@@ -43,12 +43,14 @@ class ExportPipeline:
         config: ExportConfig,
         scanner: ScannerLike,
         ingestor: IngestorLike,
+        redaction_engine=None,  # New parameter
     ):
         self.root_path = root_path.resolve()
         self.config = config
         self.scanner = scanner
         self.ingestor = ingestor
         self._payloads = ExportPayloadBuilder(config=self.config, ingestor=self.ingestor)
+        self._redaction_engine = redaction_engine
 
         factory = get_format_factory(config.format)
         self.serializer = factory.create_serializer(
@@ -145,6 +147,12 @@ class ExportPipeline:
 
             for entry in entries:
                 payload = self._payloads.build(entry)
+
+                # --- Redaction step ---
+                if isinstance(payload, TextPayload) and self._redaction_engine:
+                    new_text = self._redaction_engine.process(entry, payload.text)
+                    payload = TextPayload(text=new_text, encoding=payload.encoding)
+
                 self._dispatch_payload(entry, payload, writer.write)
 
                 if isinstance(payload, ErrorPayload):
@@ -165,7 +173,7 @@ class ExportPipeline:
             self.serializer.write_footer(writer.write)
             writer.flush()
 
-            return ExportStats(
+            stats = ExportStats(
                 files_total=total,
                 files_emitted=emitted,
                 files_skipped=skipped,
@@ -174,6 +182,11 @@ class ExportPipeline:
                 errors_by_code=errors_by,
                 scan_warning_summary=scan_warn,
             )
+            # Attach redaction statistics if available
+            if self._redaction_engine:
+                stats.redaction_stats = self._redaction_engine.get_stats()
+
+            return stats
 
         finally:
             try:

@@ -147,12 +147,7 @@ class TextPolicy:
             info = res.skipped or SkipInfo(code=SkipCode.unknown)
             return SkippedPayload(code=info.code, message=ReasonFormatter.format_skip(info), detail=info.detail)
         text = res.text or ""
-        for proc in self.config.text_processors:
-            try:
-                text = proc(text)
-            except Exception as e:
-                err = ErrorInfo(code=ErrorCode.processor_error, detail={"processor_error": str(e)})
-                return ErrorPayload(code=err.code, message=ReasonFormatter.format_error(err), detail=err.detail)
+        # Text processors are no longer applied here; redaction is handled later in the pipeline.
         return TextPayload(text=text, encoding=res.encoding or encoding_hint)
 
 

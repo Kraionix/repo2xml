@@ -1,11 +1,8 @@
 # Built-in redaction rules bundled with repo2xml.
-# Loaded when no project-specific config is found.
+# Loaded when no project-specific config overrides them.
 
 version: 1
 
-# All built-in rules are placed under the "rules" key.
-# Each rule has a unique name, a regex pattern, a replacement,
-# and a list of groups for selective enabling.
 rules:
   - name: private-key-block
     pattern: '-----BEGIN(?: [A-Z0-9]+)? PRIVATE KEY-----[\s\S]*?-----END(?: [A-Z0-9]+)? PRIVATE KEY-----'
@@ -43,8 +40,9 @@ rules:
     groups:
       - tokens
 
+  # Backreference preserves the key name: password=<redacted:password>
   - name: generic-credential
     pattern: '(?i)\b(password|passwd|pwd|secret|token|api[_-]?key)\b\s*[:=]\s*\S+'
-    replacement: '<redacted:generic>'
+    replacement: '\1=<redacted:\1>'
     groups:
       - generic
