@@ -50,8 +50,8 @@ class StandardIngestor:
         try:
             with open(path, "rb") as f:
                 if sniff_sample is not None:
-                    # The classification already read the first SNIFF_BYTES
                     sample = sniff_sample
+                    f.seek(len(sample))         
                     rest = f.read()
                 else:
                     sample = f.read(4096)
