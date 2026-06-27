@@ -237,24 +237,27 @@ Notable additions in schema 1.2:
 
 ## Architecture
 
-`repo2xml` is built with a layered, extensible architecture:
+`repo2xml` is built with a layered, extensible architecture following Clean Architecture principles:
 
-- **Domain** – stable models (`FileEntry`, `Payload`, `ExportStats`, `RestoreStats`, `TokenStats`)
+- **Domain** – stable models (`FileEntry`, `Payload`, `ExportStats`, `RestoreStats`, `TokenStats`).
 - **Services** – IO‑bound components:
-  - `scan` – filesystem scanner and gitignore engine
-  - `classify` – pluggable binary/text classification engine
-  - `ingest` – safe file reading, redaction engine
-  - `serialize` – XML serializer/deserializer (other formats planned)
-  - `restore` – filesystem restorer
-  - `output` – output targets (file, stdout, clipboard, /dev/null)
-  - `tokenize` – lazy‑loaded token counters with registry‑based factories
-- **Application** – use‑case orchestrators (`ExportPipeline`, `RestorePipeline`, policies)
-- **Facade** – `RepoXML` exposes a clean public API
-- **CLI** – Typer‑based command line interface with Rich progress reporting
+  - `scan` – filesystem scanner and gitignore engine.
+  - `classify` – pluggable binary/text classification engine.
+  - `ingest` – safe file reading and redaction engine.
+  - `serialize` – XML serializer/deserializer (other formats planned).
+  - `restore` – filesystem restorer.
+  - `output` – output targets (file, stdout, clipboard, /dev/null).
+  - `tokenize` – lazy‑loaded token counters with registry‑based factories.
+- **Application** – use‑case orchestrators and policies:
+  - `PipelineOrchestrator` – coordinates the full export flow (scan, filter, process, write).
+  - `EntryProcessor` – handles a single file: classification, redaction, token counting, and payload building.
+  - `WriterCoordinator` – manages buffered writing and delegates to the serializer.
+  - `StatisticsCollector` – aggregates counters, errors, and token statistics.
+  - `ExportPayloadBuilder` – applies policies for symlinks, binaries, and text.
+- **Facade** – `RepoXML` exposes a clean public API, wiring all components together.
+- **CLI** – Typer‑based command line interface with Rich progress reporting.
 
-Adding a new scanner backend, output format, or redaction rule requires
-implementing well‑defined abstract base classes, ensuring consistency and
-extensibility.
+This modular design ensures high testability, extensibility, and clear separation of concerns. Adding a new scanner backend, output format, or redaction rule requires implementing well‑defined abstract base classes without changing the core orchestration.
 
 ---
 

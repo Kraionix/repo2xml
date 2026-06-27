@@ -13,6 +13,7 @@ from repo2xml.domain.model import (
     ErrorPayload,
     ExportMeta,
     FileEntry,
+    FilePayload,
     LinkPayload,
     MetadataPayload,
     SkippedPayload,
@@ -227,3 +228,30 @@ class XMLSerializer(Serializer):
         if token_stats is None or token_stats.total_tokens == 0:
             return
         write(f'{self.indent(1)}<{XmlFormatSpec.TAG_STATISTICS} {XmlFormatSpec.ATTR_TOTAL_TOKENS}="{token_stats.total_tokens}" />{self.nl}')
+
+    # ------------------------------------------------------------------
+    # New unified write_file method
+    # ------------------------------------------------------------------
+
+    def write_file(self, entry: FileEntry, payload: FilePayload, write: WriteFn, token_count: Optional[int] = None) -> None:
+        """
+        Write a single file entry by dispatching to the appropriate payload-specific writer.
+
+        This method replaces the old dispatch logic that was previously in ExportPipeline.
+        """
+        if isinstance(payload, MetadataPayload):
+            self.write_metadata(entry, payload, write, token_count)
+        elif isinstance(payload, TextPayload):
+            self.write_text(entry, payload, write, token_count)
+        elif isinstance(payload, BinaryBase64Payload):
+            self.write_binary_base64(entry, payload, write, token_count)
+        elif isinstance(payload, BinaryHashPayload):
+            self.write_binary_hash(entry, payload, write, token_count)
+        elif isinstance(payload, LinkPayload):
+            self.write_link(entry, payload, write, token_count)
+        elif isinstance(payload, SkippedPayload):
+            self.write_skipped(entry, payload, write, token_count)
+        elif isinstance(payload, ErrorPayload):
+            self.write_error(entry, payload, write, token_count)
+        else:
+            raise AssertionError(f"Unhandled payload type: {type(payload)}")
