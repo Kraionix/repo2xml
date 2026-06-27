@@ -29,6 +29,7 @@ class XmlFormatSpec(FormatSpec):
     TAG_CONTENT = "content"
     TAG_ERROR = "error"
     TAG_DETAIL = "detail"
+    TAG_STATISTICS = "statistics"          # new for v1.2
 
     ATTR_VERSION = "version"
     ATTR_TOOL_VERSION = "tool_version"
@@ -47,6 +48,8 @@ class XmlFormatSpec(FormatSpec):
     ATTR_ENCODING = "encoding"
     ATTR_DECODE_ERRORS = "decode_errors"
     ATTR_MODE = "mode"
+    ATTR_TOKENS = "tokens"                 # new for v1.2
+    ATTR_TOTAL_TOKENS = "total_tokens"     # new for v1.2
 
     @staticmethod
     def classify_payload(raw_attrs: dict[str, str], content_info: dict[str, str] | None) -> Type[FilePayload]:

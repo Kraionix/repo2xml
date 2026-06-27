@@ -3,7 +3,7 @@
 Convert a source code repository into a single, structured context document for LLM ingestion.
 Supports the reverse operation: restore a full repository from an XML export.
 
-**Version 0.3.0**
+**Version 0.4.0**
 
 ---
 
@@ -17,6 +17,11 @@ Supports the reverse operation: restore a full repository from an XML export.
   - Fault‑tolerant scanning and reading
   - Configurable output (compact/pretty/minified), compression (gzip/zstd)
   - Deterministic output options (omit timestamps, redact paths, etc.)
+- **Token counting** (optional):
+  - Count tokens in text files using Hugging Face tokenizers (lazy‑loaded)
+  - Per‑file token counts stored in XML (attribute `tokens`)
+  - Aggregated statistics (`<statistics total_tokens="..."/>`)
+  - CLI report with breakdown by extension
 - **Restore** a repository from an XML export:
   - Recreate the exact directory structure
   - Write text and binary files (base64)
@@ -53,6 +58,12 @@ For zstd compression support:
 pip install -e ".[zstd]"
 ```
 
+For token counting support:
+
+```bash
+pip install -e ".[tokens]"
+```
+
 Python 3.10+ is required.
 
 ---
@@ -67,6 +78,9 @@ repo2xml -o context.xml
 
 # Export with redacted secrets and a classification config
 repo2xml --redact-secrets --redact-config .repo2xml-redact.yml -o context.xml
+
+# Export with token counting (requires 'tokens' extra)
+repo2xml --count-tokens -o context.xml
 
 # See all options
 repo2xml --help
@@ -106,7 +120,7 @@ repo2xml restore [RESTORE OPTIONS] XML_FILE
 | `--binary {skip,base64,hash}` | Binary file handling |
 | `--formatting {compact,pretty,minify}` | XML formatting style |
 | `--dry-run` | Show files that would be processed |
-| `--report` | Detailed skip/error breakdown plus redaction/classification statistics |
+| `--report` | Detailed skip/error breakdown plus redaction/classification/extension token statistics |
 | `--no-timestamp` / `--no-mtime` / `--no-size` | Deterministic output |
 | `--source` | Scanner source (default: `filesystem`) |
 | `--source-option` | Key=value pairs for the scanner (repeatable) |
@@ -115,6 +129,8 @@ repo2xml restore [RESTORE OPTIONS] XML_FILE
 | `--redact-config` | Path to YAML file overriding redaction rules |
 | `--compress {none,gzip,zstd}` | Output stream compression |
 | `--stdout` / `--clipboard` | Alternative output targets |
+| `--count-tokens` / `--no-count-tokens` | Count tokens in text files using Hugging Face tokenizers |
+| `--tokenizer-model TEXT` | Hugging Face model for tokenization (default: `deepseek-ai/DeepSeek-V4-Pro`) |
 
 ### Restore options
 
@@ -210,8 +226,12 @@ binary_threshold: 0.35
 
 ## Output Format
 
-The XML schema (version 1.1) is fully described inside the generated `<meta>` block.
+The XML schema (version 1.2) is fully described inside the generated `<meta>` block.
 The same format is accepted by the `restore` command.
+
+Notable additions in schema 1.2:
+- Each `<file>` element (for text files) may contain a `tokens` attribute with the number of tokens counted for that file (if `--count-tokens` is used).
+- An optional `<statistics total_tokens="..."/>` element at the end of the document provides the total token count across all processed text files.
 
 ---
 
@@ -219,7 +239,7 @@ The same format is accepted by the `restore` command.
 
 `repo2xml` is built with a layered, extensible architecture:
 
-- **Domain** – stable models (`FileEntry`, `Payload`, `ExportStats`, `RestoreStats`)
+- **Domain** – stable models (`FileEntry`, `Payload`, `ExportStats`, `RestoreStats`, `TokenStats`)
 - **Services** – IO‑bound components:
   - `scan` – filesystem scanner and gitignore engine
   - `classify` – pluggable binary/text classification engine
@@ -227,6 +247,7 @@ The same format is accepted by the `restore` command.
   - `serialize` – XML serializer/deserializer (other formats planned)
   - `restore` – filesystem restorer
   - `output` – output targets (file, stdout, clipboard, /dev/null)
+  - `tokenize` – lazy‑loaded token counters with registry‑based factories
 - **Application** – use‑case orchestrators (`ExportPipeline`, `RestorePipeline`, policies)
 - **Facade** – `RepoXML` exposes a clean public API
 - **CLI** – Typer‑based command line interface with Rich progress reporting

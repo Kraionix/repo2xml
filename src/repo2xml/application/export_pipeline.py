@@ -5,7 +5,7 @@ import io
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import BinaryIO, List, Optional
+from typing import BinaryIO, Dict, List, Optional
 
 from repo2xml.application.contracts import IngestorLike, ScannerLike, TokenCounter
 from repo2xml.application.filters import apply_file_filters
@@ -149,6 +149,9 @@ class ExportPipeline:
             skipped_by: dict[str, int] = {}
             errors_by: dict[str, int] = {}
 
+            # Collect token counts per file (rel_path -> count)
+            token_counts: Dict[str, Optional[int]] = {}
+
             for entry in entries:
                 if self._classification_engine:
                     classification = self._classification_engine.classify(entry)
@@ -161,16 +164,18 @@ class ExportPipeline:
                     payload = TextPayload(text=new_text, encoding=payload.encoding)
 
                 # Token counting (before serialisation)
+                token_count: Optional[int] = None
                 if self._token_counter is not None and isinstance(payload, TextPayload):
                     try:
-                        self._token_counter.count(payload.text, ext=entry.ext)
+                        token_count = self._token_counter.count(payload.text, ext=entry.ext)
                     except Exception as e:
-                        # Log but do not interrupt the pipeline.
                         logger.warning("Token counting failed for %s: %s", entry.rel_path, e)
                         errors += 1
                         errors_by["tokenization_error"] = errors_by.get("tokenization_error", 0) + 1
+                        token_count = 0  # treat as 0 tokens on error
+                token_counts[entry.rel_path] = token_count
 
-                self._dispatch_payload(entry, payload, writer.write)
+                self._dispatch_payload(entry, payload, writer.write, token_count)
 
                 if isinstance(payload, ErrorPayload):
                     errors += 1
@@ -187,6 +192,13 @@ class ExportPipeline:
                 progress.advance(1)
 
             self.serializer.write_files_close(writer.write)
+
+            # Write aggregated statistics if token counter was used
+            if self._token_counter is not None:
+                self.serializer.write_statistics(self._token_counter.get_stats(), writer.write)
+            else:
+                self.serializer.write_statistics(None, writer.write)
+
             self.serializer.write_footer(writer.write)
             writer.flush()
 
@@ -217,20 +229,20 @@ class ExportPipeline:
             except Exception:
                 pass
 
-    def _dispatch_payload(self, entry: FileEntry, payload: FilePayload, write: WriteFn) -> None:
+    def _dispatch_payload(self, entry: FileEntry, payload: FilePayload, write: WriteFn, token_count: Optional[int] = None) -> None:
         if isinstance(payload, MetadataPayload):
-            self.serializer.write_metadata(entry, payload, write)
+            self.serializer.write_metadata(entry, payload, write, token_count)
         elif isinstance(payload, TextPayload):
-            self.serializer.write_text(entry, payload, write)
+            self.serializer.write_text(entry, payload, write, token_count)
         elif isinstance(payload, BinaryBase64Payload):
-            self.serializer.write_binary_base64(entry, payload, write)
+            self.serializer.write_binary_base64(entry, payload, write, token_count)
         elif isinstance(payload, BinaryHashPayload):
-            self.serializer.write_binary_hash(entry, payload, write)
+            self.serializer.write_binary_hash(entry, payload, write, token_count)
         elif isinstance(payload, LinkPayload):
-            self.serializer.write_link(entry, payload, write)
+            self.serializer.write_link(entry, payload, write, token_count)
         elif isinstance(payload, SkippedPayload):
-            self.serializer.write_skipped(entry, payload, write)
+            self.serializer.write_skipped(entry, payload, write, token_count)
         elif isinstance(payload, ErrorPayload):
-            self.serializer.write_error(entry, payload, write)
+            self.serializer.write_error(entry, payload, write, token_count)
         else:
             raise AssertionError(f"Unhandled payload type: {type(payload)}")

@@ -117,6 +117,7 @@ class XMLDeserializer(Deserializer):
                 mtime_ns = self._parse_mtime(mtime_str)
                 is_symlink = child.get(self._spec.ATTR_SYMLINK) == "true"
                 link_target = child.get(self._spec.ATTR_LINK_TARGET)
+                # token_count is only present in <files>, not in structure, so leave None
                 entries.append(FileEntry(
                     abs_path=Path(rel_path),
                     rel_path=rel_path,
@@ -125,6 +126,7 @@ class XMLDeserializer(Deserializer):
                     mtime_ns=mtime_ns,
                     is_symlink=is_symlink,
                     symlink_target=link_target,
+                    token_count=None,   # no token info in structure
                 ))
 
     @staticmethod
@@ -157,6 +159,8 @@ class XMLDeserializer(Deserializer):
         mtime_ns = self._parse_mtime(el.get(self._spec.ATTR_MTIME))
         is_symlink = el.get(self._spec.ATTR_SYMLINK) == "true"
         link_target = el.get(self._spec.ATTR_LINK_TARGET)
+        token_attr = el.get(self._spec.ATTR_TOKENS)
+        token_count = int(token_attr) if token_attr is not None else None
         return FileEntry(
             abs_path=Path(rel_path),
             rel_path=rel_path,
@@ -165,6 +169,7 @@ class XMLDeserializer(Deserializer):
             mtime_ns=mtime_ns,
             is_symlink=is_symlink,
             symlink_target=link_target,
+            token_count=token_count,
         )
 
     def _parse_payload(self, el: ET.Element) -> FilePayload:

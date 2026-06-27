@@ -17,6 +17,7 @@ class FileEntry:
     mtime_ns: int
     is_symlink: bool
     symlink_target: Optional[str] = None
+    token_count: Optional[int] = None   # number of tokens (only for text files, optional)
 
     @property
     def ext(self) -> str:

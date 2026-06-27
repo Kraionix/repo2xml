@@ -17,7 +17,7 @@ class XMLStructureValidator:
     """Validator that ensures the XML document conforms to the expected structure."""
 
     # Supported schema versions that can be parsed
-    SUPPORTED_VERSIONS = {"1.0", "1.1"}
+    SUPPORTED_VERSIONS = {"1.0", "1.1", "1.2"}
 
     def __init__(self, root: Element):
         """
@@ -34,6 +34,7 @@ class XMLStructureValidator:
         self._check_meta()
         self._check_project_structure()
         self._check_files()
+        self._check_statistics()
         # Additional checks can be added here as the schema evolves
 
     def _check_root(self) -> None:
@@ -102,6 +103,7 @@ class XMLStructureValidator:
         - Every <file> must have a 'path' attribute.
         - Path must not contain '..'.
         - The combination of attributes must allow payload classification.
+        - If 'tokens' attribute is present, it must be a non-negative integer.
         """
         files_el = self.root.find(XmlFormatSpec.TAG_FILES)
         if files_el is None:
@@ -116,6 +118,16 @@ class XMLStructureValidator:
                 raise DeserializationError("File entry in <files> missing 'path' attribute")
             self._check_path_safety(path_attr)
 
+            # Validate tokens attribute if present
+            tokens_attr = file_el.get(XmlFormatSpec.ATTR_TOKENS)
+            if tokens_attr is not None:
+                try:
+                    tokens = int(tokens_attr)
+                    if tokens < 0:
+                        raise DeserializationError(f"Negative tokens count for '{path_attr}': {tokens}")
+                except ValueError:
+                    raise DeserializationError(f"Invalid tokens attribute for '{path_attr}': {tokens_attr}")
+
             # Attempt to classify the payload; this verifies that the attribute
             # combination is valid (no contradictory flags).
             attrs = dict(file_el.attrib)
@@ -129,6 +141,25 @@ class XMLStructureValidator:
                 raise DeserializationError(
                     f"Cannot classify payload for file '{path_attr}': {exc}"
                 ) from exc
+
+    def _check_statistics(self) -> None:
+        """
+        Validate the optional <statistics> element:
+        - If present, must have a 'total_tokens' attribute.
+        - total_tokens must be a non-negative integer.
+        """
+        stats_el = self.root.find(XmlFormatSpec.TAG_STATISTICS)
+        if stats_el is None:
+            return  # optional, fine
+        total_attr = stats_el.get(XmlFormatSpec.ATTR_TOTAL_TOKENS)
+        if total_attr is None:
+            raise DeserializationError("Missing 'total_tokens' attribute in <statistics>")
+        try:
+            total = int(total_attr)
+            if total < 0:
+                raise DeserializationError(f"Negative total_tokens in <statistics>: {total}")
+        except ValueError:
+            raise DeserializationError(f"Invalid total_tokens value: {total_attr}")
 
     @staticmethod
     def _check_path_safety(path: str) -> None:

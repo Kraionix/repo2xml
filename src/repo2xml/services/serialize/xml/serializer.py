@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence
 
 from repo2xml.application.contracts import Serializer
+from repo2xml.domain.constants import SCHEMA_VERSION
 from repo2xml.domain.model import (
     BinaryBase64Payload,
     BinaryHashPayload,
@@ -16,6 +17,7 @@ from repo2xml.domain.model import (
     MetadataPayload,
     SkippedPayload,
     TextPayload,
+    TokenStats,
 )
 from repo2xml.services.serialize.base import WriteFn
 from repo2xml.services.serialize.xml.format_spec import XmlFormatSpec
@@ -87,7 +89,7 @@ class XMLSerializer(Serializer):
         i2 = self.indent(2)
         write(f'{i0}<?xml version="1.0" encoding="utf-8"?>{nl}')
         write(
-            f'{i0}<{XmlFormatSpec.TAG_ROOT} {XmlFormatSpec.ATTR_VERSION}="{esc_attr(meta.schema_version)}" '
+            f'{i0}<{XmlFormatSpec.TAG_ROOT} {XmlFormatSpec.ATTR_VERSION}="{SCHEMA_VERSION}" '
             f'{XmlFormatSpec.ATTR_TOOL_VERSION}="{esc_attr(meta.tool_version)}">{nl}'
         )
         write(f"{i1}<{XmlFormatSpec.TAG_META}>{nl}")
@@ -151,15 +153,17 @@ class XMLSerializer(Serializer):
     # Payload writers (one per type)
     # ------------------------------------------------------------------
 
-    def write_metadata(self, entry: FileEntry, payload: MetadataPayload, write: WriteFn) -> None:
+    def write_metadata(self, entry: FileEntry, payload: MetadataPayload, write: WriteFn, token_count: Optional[int] = None) -> None:
         attrs = self._file_attr_str(entry)
         write(f'{self.indent(2)}<{XmlFormatSpec.TAG_FILE} {attrs} />{self.nl}')
 
-    def write_text(self, entry: FileEntry, payload: TextPayload, write: WriteFn) -> None:
+    def write_text(self, entry: FileEntry, payload: TextPayload, write: WriteFn, token_count: Optional[int] = None) -> None:
         nl = self.nl
         i2 = self.indent(2)
         i3 = self.indent(3)
         attrs = self._file_attr_str(entry)
+        if token_count is not None:
+            attrs += f' tokens="{token_count}"'
         content_attrs = []
         if payload.encoding:
             content_attrs.append(f' {XmlFormatSpec.ATTR_ENCODING}="{esc_attr(payload.encoding)}"')
@@ -169,7 +173,7 @@ class XMLSerializer(Serializer):
         write(f"{i3}<{XmlFormatSpec.TAG_CONTENT}{''.join(content_attrs)}>{cdata(payload.text)}</{XmlFormatSpec.TAG_CONTENT}>{nl}")
         write(f"{i2}</{XmlFormatSpec.TAG_FILE}>{nl}")
 
-    def write_binary_base64(self, entry: FileEntry, payload: BinaryBase64Payload, write: WriteFn) -> None:
+    def write_binary_base64(self, entry: FileEntry, payload: BinaryBase64Payload, write: WriteFn, token_count: Optional[int] = None) -> None:
         nl = self.nl
         i2 = self.indent(2)
         i3 = self.indent(3)
@@ -181,7 +185,7 @@ class XMLSerializer(Serializer):
         write(f"</{XmlFormatSpec.TAG_CONTENT}>{nl}")
         write(f"{i2}</{XmlFormatSpec.TAG_FILE}>{nl}")
 
-    def write_binary_hash(self, entry: FileEntry, payload: BinaryHashPayload, write: WriteFn) -> None:
+    def write_binary_hash(self, entry: FileEntry, payload: BinaryHashPayload, write: WriteFn, token_count: Optional[int] = None) -> None:
         nl = self.nl
         i2 = self.indent(2)
         i3 = self.indent(3)
@@ -190,11 +194,11 @@ class XMLSerializer(Serializer):
         write(f'{i3}<{XmlFormatSpec.TAG_CONTENT} {XmlFormatSpec.ATTR_ENCODING}="sha256">{html.escape(payload.sha256_hex)}</{XmlFormatSpec.TAG_CONTENT}>{nl}')
         write(f"{i2}</{XmlFormatSpec.TAG_FILE}>{nl}")
 
-    def write_link(self, entry: FileEntry, payload: LinkPayload, write: WriteFn) -> None:
+    def write_link(self, entry: FileEntry, payload: LinkPayload, write: WriteFn, token_count: Optional[int] = None) -> None:
         attrs = self._file_attr_str(entry, link_target_override=payload.link_target)
         write(f'{self.indent(2)}<{XmlFormatSpec.TAG_FILE} {attrs} {XmlFormatSpec.ATTR_LINK_ONLY}="true" />{self.nl}')
 
-    def write_skipped(self, entry: FileEntry, payload: SkippedPayload, write: WriteFn) -> None:
+    def write_skipped(self, entry: FileEntry, payload: SkippedPayload, write: WriteFn, token_count: Optional[int] = None) -> None:
         nl = self.nl
         i2 = self.indent(2)
         i3 = self.indent(3)
@@ -204,7 +208,7 @@ class XMLSerializer(Serializer):
         self._write_detail_if_any(payload.detail, indent_str=i3, write=write)
         write(f"{i2}</{XmlFormatSpec.TAG_FILE}>{nl}")
 
-    def write_error(self, entry: FileEntry, payload: ErrorPayload, write: WriteFn) -> None:
+    def write_error(self, entry: FileEntry, payload: ErrorPayload, write: WriteFn, token_count: Optional[int] = None) -> None:
         nl = self.nl
         i2 = self.indent(2)
         i3 = self.indent(3)
@@ -213,3 +217,13 @@ class XMLSerializer(Serializer):
         write(f"{i3}<{XmlFormatSpec.TAG_ERROR}>{html.escape(xml_sanitize_text(payload.message))}</{XmlFormatSpec.TAG_ERROR}>{nl}")
         self._write_detail_if_any(payload.detail, indent_str=i3, write=write)
         write(f"{i2}</{XmlFormatSpec.TAG_FILE}>{nl}")
+
+    # ------------------------------------------------------------------
+    # Statistics
+    # ------------------------------------------------------------------
+
+    def write_statistics(self, token_stats: Optional[TokenStats], write: WriteFn) -> None:
+        """Write aggregated statistics (only if token_stats is provided and total_tokens > 0)."""
+        if token_stats is None or token_stats.total_tokens == 0:
+            return
+        write(f'{self.indent(1)}<{XmlFormatSpec.TAG_STATISTICS} {XmlFormatSpec.ATTR_TOTAL_TOKENS}="{token_stats.total_tokens}" />{self.nl}')
