@@ -80,6 +80,9 @@ class ExportConfig:
     redact: bool = False
     redact_config_path: Optional[Path] = None
     classify_config_path: Optional[Path] = None   # Optional user YAML for classification
+    # Token counting
+    count_tokens: bool = False
+    tokenizer_model: str = "deepseek-ai/DeepSeek-V4-Pro"
 
     def normalize(self) -> None:
         self.format = (self.format or "xml").strip().lower()
@@ -116,6 +119,15 @@ class ExportConfig:
             raise ConfigurationError("source must not be empty")
         if self.classify_config_path is not None and not self.classify_config_path.is_file():
             raise ConfigurationError(f"Classify config file does not exist: {self.classify_config_path}")
+        # Token counting dependency check
+        if self.count_tokens:
+            try:
+                import transformers  # noqa: F401
+            except ImportError:
+                raise ConfigurationError(
+                    "Token counting requires the 'transformers' library. "
+                    "Install with: pip install repo2xml[tokens]"
+                )
 
 
 @dataclass(slots=True)

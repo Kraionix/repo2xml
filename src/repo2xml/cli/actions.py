@@ -104,6 +104,8 @@ def execute_export(
     source_option: Optional[list[str]],
     redact_config: Optional[Path],
     classify_config: Optional[Path],
+    count_tokens: bool,
+    tokenizer_model: str,
 ) -> None:
     """Run the full repo2xml export workflow."""
     if version:
@@ -115,6 +117,10 @@ def execute_export(
         log_level = LogLevel.error
 
     root = path.resolve()
+
+    # Disable token counting in dry-run or stats-only modes
+    if dry_run or stats_only:
+        count_tokens = False
 
     if validate_xml:
         if stdout or clipboard or stats_only:
@@ -185,6 +191,8 @@ def execute_export(
             redact=redact,
             redact_config_path=redact_config,
             classify_config_path=classify_config,
+            count_tokens=count_tokens,
+            tokenizer_model=tokenizer_model,
         )
         config.normalize()
         config.validate()
@@ -220,7 +228,13 @@ def execute_export(
     start_time = time.time()
     try:
         with target.open() as out_stream:
-            stats = engine.export(root, out_stream, progress=reporter)
+            stats = engine.export(
+                root,
+                out_stream,
+                progress=reporter,
+                dry_run=dry_run,
+                stats_only=stats_only,
+            )
 
         elapsed = time.time() - start_time
 
@@ -272,6 +286,31 @@ def execute_export(
                 if cs.errors:
                     table.add_row("Errors", str(cs.errors))
                 console.print(table)
+
+        # Token statistics output (always shown if available, unless quiet)
+        if stats.token_stats is not None and not quiet:
+            ts = stats.token_stats
+            token_table = Table(title="Token Statistics", show_header=True, header_style="bold")
+            token_table.add_column("Metric", style="dim")
+            token_table.add_column("Value", justify="right")
+            token_table.add_row("Total tokens", f"{ts.total_tokens:,}")
+            token_table.add_row("Files processed", str(ts.files_processed))
+            token_table.add_row("Files skipped (errors)", str(ts.files_skipped))
+            token_table.add_row("Max tokens in file", f"{ts.max_tokens:,}")
+            token_table.add_row("Min tokens in file", f"{ts.min_tokens:,}")
+            token_table.add_row("Errors during tokenization", str(ts.errors))
+            console.print(token_table)
+
+            if report and ts.tokens_by_extension:
+                ext_table = Table(title="Tokens by Extension", show_header=True, header_style="bold")
+                ext_table.add_column("Extension", style="dim")
+                ext_table.add_column("Tokens", justify="right")
+                ext_table.add_column("Percentage", justify="right")
+                total = ts.total_tokens
+                for ext, count in sorted(ts.tokens_by_extension.items(), key=lambda x: -x[1]):
+                    pct = f"{count / total * 100:.1f}%" if total > 0 else "0%"
+                    ext_table.add_row(ext or "(no extension)", f"{count:,}", pct)
+                console.print(ext_table)
 
         if validate_xml:
             xml_path = out_abs

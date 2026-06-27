@@ -18,6 +18,7 @@ from repo2xml.services.classify import ClassificationEngine
 from repo2xml.services.ingest.redact import RedactionEngine
 from repo2xml.services.scan.gitignore import GitignoreEngine
 from repo2xml.services.scan.registry import create_scanner
+from repo2xml.services.tokenize import create_token_counter
 
 logger = logging.getLogger("repo2xml.facade")
 
@@ -34,6 +35,8 @@ class RepoXML:
         output_stream: BinaryIO,
         *,
         progress: Optional[ProgressReporter] = None,
+        dry_run: bool = False,
+        stats_only: bool = False,
     ) -> ExportStats:
         if not isinstance(self.config, ExportConfig):
             raise FacadeError("Export operation requires ExportConfig")
@@ -74,6 +77,14 @@ class RepoXML:
                 config_path=config.redact_config_path,
             )
 
+        # Token counter – only if enabled and not in dry-run/stats-only modes
+        token_counter = None
+        if config.count_tokens and not dry_run and not stats_only:
+            token_counter = create_token_counter(
+                "huggingface",
+                model=config.tokenizer_model,
+            )
+
         pipeline = ExportPipeline(
             root_path=root,
             config=config,
@@ -81,6 +92,7 @@ class RepoXML:
             ingestor=ingestor,
             classification_engine=classification_engine,
             redaction_engine=redaction_engine,
+            token_counter=token_counter,
         )
         reporter = progress or _null_reporter()
         return pipeline.execute(output_stream=output_stream, progress=reporter)

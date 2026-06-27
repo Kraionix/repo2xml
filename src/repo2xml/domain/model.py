@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Iterable, Iterator, List, Literal, Optional, Union, Any
+from typing import Iterable, Iterator, List, Literal, Optional, Union, Any, Dict
 
 
 @dataclass(slots=True)
@@ -73,6 +73,18 @@ class ErrorInfo:
 
 
 @dataclass(slots=True)
+class TokenStats:
+    """Aggregated token counting statistics."""
+    total_tokens: int = 0
+    files_processed: int = 0
+    files_skipped: int = 0
+    tokens_by_extension: Dict[str, int] = field(default_factory=dict)
+    max_tokens: int = 0
+    min_tokens: int = 0
+    errors: int = 0
+
+
+@dataclass(slots=True)
 class ExportStats:
     files_total: int
     files_emitted: int
@@ -83,6 +95,7 @@ class ExportStats:
     scan_warning_summary: Optional[str] = None
     redaction_stats: Optional[Any] = None
     classification_stats: Optional[Any] = None
+    token_stats: Optional[TokenStats] = None
 
 
 @dataclass(slots=True)

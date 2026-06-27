@@ -14,6 +14,7 @@ from repo2xml.domain.model import (
     RestoreMeta,
     RestoreStats,
     TextReadResult,
+    TokenStats,
 )
 from repo2xml.services.scan.gitignore import IgnoreRuleset
 
@@ -53,6 +54,29 @@ class ProgressReporter(Protocol):
     def set_phase(self, phase: str) -> None: ...
     def set_warning_count(self, count: int) -> None: ...
     def set_postfix(self, text: str) -> None: ...
+
+
+# ----------------------------------------------------------------------
+# Token counting contracts (new)
+# ----------------------------------------------------------------------
+
+class TokenCounter(Protocol):
+    """Protocol for token counters."""
+    def count(self, text: str, ext: str = "") -> int:
+        """Count tokens in text, updating internal stats. Return token count."""
+        ...
+
+    def get_stats(self) -> TokenStats:
+        """Return accumulated token statistics."""
+        ...
+
+
+class TokenCounterFactory(ABC):
+    """Abstract factory for token counters."""
+    @abstractmethod
+    def create(self, model: str, **kwargs) -> TokenCounter:
+        """Create a TokenCounter instance for the given model."""
+        ...
 
 
 # ----------------------------------------------------------------------

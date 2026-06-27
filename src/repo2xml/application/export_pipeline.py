@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import BinaryIO, List, Optional
 
-from repo2xml.application.contracts import IngestorLike, ScannerLike
+from repo2xml.application.contracts import IngestorLike, ScannerLike, TokenCounter
 from repo2xml.application.filters import apply_file_filters
 from repo2xml.application.policies import ExportPayloadBuilder
 from repo2xml.application.progress import ProgressReporter
@@ -45,6 +45,7 @@ class ExportPipeline:
         ingestor: IngestorLike,
         classification_engine=None,
         redaction_engine=None,
+        token_counter: Optional[TokenCounter] = None,
     ):
         self.root_path = root_path.resolve()
         self.config = config
@@ -52,6 +53,7 @@ class ExportPipeline:
         self.ingestor = ingestor
         self._classification_engine = classification_engine
         self._redaction_engine = redaction_engine
+        self._token_counter = token_counter
         self._payloads = ExportPayloadBuilder(config=self.config, ingestor=self.ingestor)
 
         factory = get_format_factory(config.format)
@@ -158,6 +160,16 @@ class ExportPipeline:
                     new_text = self._redaction_engine.process(entry, payload.text)
                     payload = TextPayload(text=new_text, encoding=payload.encoding)
 
+                # Token counting (before serialisation)
+                if self._token_counter is not None and isinstance(payload, TextPayload):
+                    try:
+                        self._token_counter.count(payload.text, ext=entry.ext)
+                    except Exception as e:
+                        # Log but do not interrupt the pipeline.
+                        logger.warning("Token counting failed for %s: %s", entry.rel_path, e)
+                        errors += 1
+                        errors_by["tokenization_error"] = errors_by.get("tokenization_error", 0) + 1
+
                 self._dispatch_payload(entry, payload, writer.write)
 
                 if isinstance(payload, ErrorPayload):
@@ -191,6 +203,8 @@ class ExportPipeline:
                 stats.redaction_stats = self._redaction_engine.get_stats()
             if self._classification_engine:
                 stats.classification_stats = self._classification_engine.get_stats()
+            if self._token_counter is not None:
+                stats.token_stats = self._token_counter.get_stats()
             return stats
 
         finally:

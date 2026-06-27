@@ -64,6 +64,9 @@ def main(
     source_option: Optional[List[str]] = typer.Option(None, "--source-option", help="Extra key=value pairs for the scanner."),
     redact_config: Optional[Path] = typer.Option(None, "--redact-config", help="Path to YAML file with redaction rules.", exists=True, file_okay=True, dir_okay=False, resolve_path=True),
     classify_config: Optional[Path] = typer.Option(None, "--classify-config", help="Path to YAML file with classification rules.", exists=True, file_okay=True, dir_okay=False, resolve_path=True),
+    # Token counting options
+    count_tokens: bool = typer.Option(False, "--count-tokens/--no-count-tokens", help="Count tokens in text files."),
+    tokenizer_model: str = typer.Option("deepseek-ai/DeepSeek-V4-Pro", "--tokenizer-model", help="Hugging Face model for tokenization."),
 ) -> None:
     """repo2xml: convert a repository into a single context document for LLM ingestion."""
     console = Console(no_color=no_color)
@@ -109,6 +112,8 @@ def main(
         source_option=source_option,
         redact_config=redact_config,
         classify_config=classify_config,
+        count_tokens=count_tokens,
+        tokenizer_model=tokenizer_model,
     )
 
 
