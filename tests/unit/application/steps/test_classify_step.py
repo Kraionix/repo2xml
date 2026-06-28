@@ -6,9 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from repo2xml.application.processing_context import ProcessingContext
 from repo2xml.application.steps.classify_step import ClassifyStep
-from repo2xml.domain.model import ClassificationResult, FileEntry
+from repo2xml.domain.model import ClassificationResult, FileEntry, ProcessingInput, ProcessingResult
 from repo2xml.services.classify import ClassificationEngine
 
 
@@ -29,26 +28,28 @@ class TestClassifyStep:
         mock_engine.classify.return_value = ClassificationResult(kind="text", encoding="utf-8")
 
         step = ClassifyStep(mock_engine)
-        ctx = ProcessingContext(entry=entry)
-        step.process(ctx)
+        input = ProcessingInput(entry=entry)
+        result = ProcessingResult()
+        step.process(input, result)
 
         mock_engine.classify.assert_called_once_with(entry)
-        assert ctx.classification is not None
-        assert ctx.classification.kind == "text"
-        assert ctx.should_stop is False
-        assert ctx.is_success is False  # Not set here
+        assert result.classification is not None
+        assert result.classification.kind == "text"
+        assert result.should_stop is False
+        assert result.is_success is False  # Not set here
 
     def test_error(self, entry: FileEntry) -> None:
         mock_engine = MagicMock(spec=ClassificationEngine)
         mock_engine.classify.return_value = ClassificationResult(kind="error", error="read failed")
 
         step = ClassifyStep(mock_engine)
-        ctx = ProcessingContext(entry=entry)
-        step.process(ctx)
+        input = ProcessingInput(entry=entry)
+        result = ProcessingResult()
+        step.process(input, result)
 
-        assert ctx.classification is not None
-        assert ctx.classification.kind == "error"
-        assert ctx.should_stop is True
-        assert ctx.is_success is False
-        assert ctx.error_code == "classification_error"
-        assert ctx.message == "read failed"
+        assert result.classification is not None
+        assert result.classification.kind == "error"
+        assert result.should_stop is True
+        assert result.is_success is False
+        assert result.error_code == "sniff_read_error"
+        assert result.message == "read failed"

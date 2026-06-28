@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from repo2xml.domain.model import ExportMeta, FileEntry, FilePayload, TokenStats
+
+WriteFn = Callable[[str], None]
 
 
 class DocumentWriter(ABC):
@@ -54,4 +56,9 @@ class DocumentWriter(ABC):
     @abstractmethod
     def end_document(self) -> None:
         """Write the document footer and any closing markup."""
+        ...
+
+    @abstractmethod
+    def set_write_fn(self, write_fn: WriteFn) -> None:
+        """Set the write function to be used for output."""
         ...

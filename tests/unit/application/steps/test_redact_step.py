@@ -6,9 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from repo2xml.application.processing_context import ProcessingContext
 from repo2xml.application.steps.redact_step import RedactStep
-from repo2xml.domain.model import FileEntry, TextPayload
+from repo2xml.domain.model import FileEntry, TextPayload, ProcessingInput, ProcessingResult
 from repo2xml.services.ingest.redact import RedactionEngine
 
 
@@ -29,36 +28,38 @@ class TestRedactStep:
         mock_engine.process.return_value = "redacted content"
 
         step = RedactStep(mock_engine)
-        ctx = ProcessingContext(entry=entry)
+        input = ProcessingInput(entry=entry)
+        result = ProcessingResult()
         original_payload = TextPayload(text="secret content", encoding="utf-8")
-        ctx.payload = original_payload
+        result.payload = original_payload
 
-        step.process(ctx)
+        step.process(input, result)
 
         mock_engine.process.assert_called_once_with(entry, "secret content")
-        assert isinstance(ctx.payload, TextPayload)
-        assert ctx.payload.text == "redacted content"
-        assert ctx.payload.encoding == "utf-8"
+        assert isinstance(result.payload, TextPayload)
+        assert result.payload.text == "redacted content"
+        assert result.payload.encoding == "utf-8"
 
     def test_ignores_non_text_payload(self, entry: FileEntry) -> None:
         mock_engine = MagicMock(spec=RedactionEngine)
         step = RedactStep(mock_engine)
-        ctx = ProcessingContext(entry=entry)
-        ctx.payload = MagicMock()  # not TextPayload
+        input = ProcessingInput(entry=entry)
+        result = ProcessingResult()
+        result.payload = MagicMock()  # not TextPayload
 
-        step.process(ctx)
+        step.process(input, result)
 
         mock_engine.process.assert_not_called()
-        # Payload unchanged
-        assert ctx.payload is not None
+        assert result.payload is not None
 
     def test_handles_none_payload(self, entry: FileEntry) -> None:
         mock_engine = MagicMock(spec=RedactionEngine)
         step = RedactStep(mock_engine)
-        ctx = ProcessingContext(entry=entry)
-        ctx.payload = None
+        input = ProcessingInput(entry=entry)
+        result = ProcessingResult()
+        result.payload = None
 
-        step.process(ctx)
+        step.process(input, result)
 
         mock_engine.process.assert_not_called()
-        assert ctx.payload is None
+        assert result.payload is None

@@ -1,3 +1,4 @@
+# tests/unit/application/test_step_factory.py
 """Unit tests for StepFactory."""
 
 from pathlib import Path
@@ -47,7 +48,6 @@ class TestStepFactory:
             redact=RedactConfig(enabled=False),
             token=TokenCountConfig(enabled=False),
         )
-        # Build policy list for full mode with symlink follow (no SymlinkPolicy)
         policies: list[FilePolicy] = [
             ErrorPolicy(),
             BinaryPolicy(config.binary, ingestor),
@@ -56,7 +56,6 @@ class TestStepFactory:
         factory = StepFactory(config, services, policies)
         steps = factory.create_steps()
 
-        # Expect ClassifyStep and BuildPayloadStep only
         assert len(steps) == 2
         assert isinstance(steps[0], ClassifyStep)
         assert isinstance(steps[1], BuildPayloadStep)
@@ -163,7 +162,6 @@ class TestStepFactory:
             redact=RedactConfig(enabled=False),
             token=TokenCountConfig(enabled=False),
         )
-        # In metadata mode, only ModePolicy is used.
         policies: list[FilePolicy] = [ModePolicy(Mode.metadata)]
         factory = StepFactory(config, services, policies)
         steps = factory.create_steps()

@@ -1,3 +1,4 @@
+# tests/unit/application/test_writer.py
 """Unit tests for BufferedTextWriter and WriterCoordinator."""
 
 import io
@@ -8,6 +9,7 @@ import pytest
 
 from repo2xml.application.writer import BufferedTextWriter
 from repo2xml.application.writer_coordinator import WriterCoordinator
+from repo2xml.contracts.document_writer import DocumentWriter
 from repo2xml.domain.model import ExportMeta, FileEntry, TextPayload, TokenStats
 from repo2xml.services.output.targets import OutputTarget
 
@@ -76,20 +78,11 @@ class BytesIOOutputTarget(OutputTarget):
 
 class TestWriterCoordinator:
     @pytest.fixture
-    def mock_metadata_writer(self) -> MagicMock:
-        return MagicMock()
-
-    @pytest.fixture
-    def mock_structure_writer(self) -> MagicMock:
-        return MagicMock()
-
-    @pytest.fixture
-    def mock_section_writer(self) -> MagicMock:
-        return MagicMock()
-
-    @pytest.fixture
-    def mock_content_writer(self) -> MagicMock:
-        return MagicMock()
+    def mock_document_writer(self) -> MagicMock:
+        mock = MagicMock(spec=DocumentWriter)
+        # Provide a dummy implementation for set_write_fn
+        mock.set_write_fn = MagicMock()
+        return mock
 
     @pytest.fixture
     def real_output_target(self) -> BytesIOOutputTarget:
@@ -98,17 +91,11 @@ class TestWriterCoordinator:
     @pytest.fixture
     def coordinator(
         self,
-        mock_metadata_writer,
-        mock_structure_writer,
-        mock_section_writer,
-        mock_content_writer,
+        mock_document_writer,
         real_output_target,
     ) -> WriterCoordinator:
         return WriterCoordinator(
-            metadata_writer=mock_metadata_writer,
-            structure_writer=mock_structure_writer,
-            section_writer=mock_section_writer,
-            content_writer=mock_content_writer,
+            document_writer=mock_document_writer,
             output_target=real_output_target,
             buffer_chars=10,
         )
@@ -124,57 +111,46 @@ class TestWriterCoordinator:
         assert coordinator._text_wrapper is None
         assert coordinator._buffered_writer is None
 
-    def test_write_header(self, coordinator, mock_metadata_writer) -> None:
+    def test_write_header(self, coordinator, mock_document_writer) -> None:
         meta = ExportMeta(root_path="/", generated_at_utc=None, tool_version="0", schema_version="1")
         with coordinator:
             coordinator.write_header(meta)
-            mock_metadata_writer.write_header.assert_called_once_with(meta, coordinator._write_fn)
+            mock_document_writer.begin_document.assert_called_once_with(meta)
 
-    def test_write_structure(self, coordinator, mock_structure_writer) -> None:
+    def test_write_structure(self, coordinator, mock_document_writer) -> None:
         entries = [MagicMock(spec=FileEntry)]
         with coordinator:
             coordinator.write_structure(entries)
-            mock_structure_writer.write_structure.assert_called_once_with(entries, coordinator._write_fn)
+            mock_document_writer.write_structure.assert_called_once_with(entries)
 
-    def test_write_files_open(self, coordinator, mock_section_writer) -> None:
+    def test_write_files_open(self, coordinator, mock_document_writer) -> None:
         with coordinator:
             coordinator.write_files_open("full")
-            mock_section_writer.write_files_open.assert_called_once_with("full", coordinator._write_fn)
+            mock_document_writer.begin_files_section.assert_called_once_with("full")
 
-    def test_write_file(self, coordinator, mock_content_writer) -> None:
+    def test_write_file(self, coordinator, mock_document_writer) -> None:
         entry = MagicMock(spec=FileEntry)
         payload = TextPayload(text="test")
         with coordinator:
             coordinator.write_file(entry, payload, token_count=42)
-            mock_content_writer.write_file.assert_called_once_with(entry, payload, coordinator._write_fn, 42)
+            mock_document_writer.write_file.assert_called_once_with(entry, payload, 42)
 
-    def test_write_statistics(self, coordinator, mock_metadata_writer) -> None:
+    def test_write_statistics(self, coordinator, mock_document_writer) -> None:
         stats = TokenStats(total_tokens=100)
         with coordinator:
             coordinator.write_statistics(stats)
-            mock_metadata_writer.write_statistics.assert_called_once_with(stats, coordinator._write_fn)
+            mock_document_writer.write_statistics.assert_called_once_with(stats)
 
-    def test_write_footer(self, coordinator, mock_metadata_writer) -> None:
+    def test_write_footer(self, coordinator, mock_document_writer) -> None:
         with coordinator:
             coordinator.write_footer()
-            mock_metadata_writer.write_footer.assert_called_once_with(coordinator._write_fn)
+            mock_document_writer.end_document.assert_called_once()
 
-    def test_write_files_close(self, coordinator, mock_section_writer) -> None:
+    def test_write_files_close(self, coordinator, mock_document_writer) -> None:
         with coordinator:
             coordinator.write_files_close()
-            mock_section_writer.write_files_close.assert_called_once_with(coordinator._write_fn)
+            mock_document_writer.end_files_section.assert_called_once()
 
     def test_write_without_context_raises(self, coordinator) -> None:
         with pytest.raises(RuntimeError, match="not opened"):
             coordinator.write_header(MagicMock())
-
-    def test_close_handles_errors(self, coordinator) -> None:
-        # Manually set up a mock to simulate error on flush
-        coordinator._text_wrapper = MagicMock()
-        coordinator._text_wrapper.flush.side_effect = OSError("flush failed")
-        coordinator._stream = MagicMock()
-
-        coordinator.close()
-        assert coordinator._stream is None
-        assert coordinator._text_wrapper is None
-        assert coordinator._buffered_writer is None

@@ -3,6 +3,7 @@
 
 from pathlib import Path
 from typing import Iterator
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -19,6 +20,8 @@ from repo2xml.domain.model import (
     LinkPayload,
     MetadataPayload,
     ParsedRepository,
+    ProcessingInput,
+    ProcessingResult,
     RestoreEntry,
     RestoreMeta,
     RestoreStats,
@@ -273,8 +276,6 @@ class TestRestoreStats:
 class TestPayloads:
     def test_metadata_payload(self) -> None:
         p = MetadataPayload()
-        # FilePayload is a type alias (Union), not a class, so isinstance doesn't work.
-        # Instead we just check the type directly.
         assert type(p) is MetadataPayload
 
     def test_link_payload(self) -> None:
@@ -388,3 +389,68 @@ class TestTextReadResult:
         assert res.text is None
         assert res.encoding is None
         assert res.skipped is None
+
+
+# ---- New tests for ProcessingInput/ProcessingResult ----
+
+class TestProcessingInput:
+    def test_creation(self) -> None:
+        entry = FileEntry(
+            abs_path=Path("/a"),
+            rel_path="a",
+            name="a",
+            size=0,
+            mtime_ns=0,
+            is_symlink=False,
+        )
+        input = ProcessingInput(entry=entry)
+        assert input.entry is entry
+
+    def test_frozen(self) -> None:
+        entry = FileEntry(
+            abs_path=Path("/a"),
+            rel_path="a",
+            name="a",
+            size=0,
+            mtime_ns=0,
+            is_symlink=False,
+        )
+        input = ProcessingInput(entry=entry)
+        with pytest.raises(AttributeError):
+            input.entry = None  # type: ignore
+
+
+class TestProcessingResult:
+    def test_defaults(self) -> None:
+        result = ProcessingResult()
+        assert result.classification is None
+        assert result.payload is None
+        assert result.token_count is None
+        assert result.should_stop is False
+        assert result.is_success is False
+        assert result.skip_code is None
+        assert result.error_code is None
+        assert result.message is None
+        assert result.metadata == {}
+
+    def test_set_fields(self) -> None:
+        result = ProcessingResult()
+        result.classification = MagicMock()
+        result.payload = MagicMock()
+        result.token_count = 42
+        result.should_stop = True
+        result.is_success = True
+        result.skip_code = SkipCode.text_size_limit
+        result.error_code = ErrorCode.stat_error
+        result.message = "msg"
+        result.metadata["key"] = "value"
+
+        assert result.classification is not None
+        assert result.payload is not None
+        assert result.token_count == 42
+        assert result.should_stop is True
+        assert result.is_success is True
+        assert result.skip_code == SkipCode.text_size_limit
+        assert result.error_code == ErrorCode.stat_error
+        assert result.message == "msg"
+        assert result.metadata == {"key": "value"}

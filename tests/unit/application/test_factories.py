@@ -83,9 +83,9 @@ class TestExportComponentFactory:
         mock_classification_engine.return_value = MagicMock()
         mock_redaction_engine.return_value = MagicMock()
         mock_create_token.return_value = MagicMock()
-        mock_serializer = MagicMock()
+        mock_document_writer = MagicMock()
         mock_format_factory = MagicMock()
-        mock_format_factory.create_serializer.return_value = mock_serializer
+        mock_format_factory.create_document_writer.return_value = mock_document_writer
         mock_get_format.return_value = mock_format_factory
         mock_writer = MagicMock()
         mock_writer_coordinator.return_value = mock_writer
@@ -123,18 +123,16 @@ class TestExportComponentFactory:
         mock_redaction_engine.assert_not_called()
         mock_create_token.assert_not_called()
 
-        mock_format_factory.create_serializer.assert_called_once_with(
+        mock_format_factory.create_document_writer.assert_called_once_with(
             formatting=config.output.formatting.value,
             include_mtime=config.output.include_mtime,
             include_size=config.output.include_size,
             text_decode_errors=config.text.decode_errors.value,
+            write_fn=ANY,  # dummy write function
         )
 
         mock_writer_coordinator.assert_called_once_with(
-            metadata_writer=mock_serializer,
-            structure_writer=mock_serializer,
-            section_writer=mock_serializer,
-            content_writer=mock_serializer,
+            document_writer=mock_document_writer,
             output_target=output_target,
             buffer_chars=config.output.write_buffer_chars,
         )

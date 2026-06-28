@@ -8,9 +8,8 @@ import pytest
 
 from repo2xml.application.entry_processor import EntryProcessor
 from repo2xml.application.pipeline import Pipeline
-from repo2xml.application.processing_context import ProcessingContext
 from repo2xml.application.process_result import ProcessResult
-from repo2xml.domain.model import FileEntry, TextPayload
+from repo2xml.domain.model import FileEntry, TextPayload, ProcessingInput, ProcessingResult
 
 
 class TestEntryProcessor:
@@ -31,73 +30,72 @@ class TestEntryProcessor:
         )
 
     def test_process_success(self, mock_pipeline: MagicMock, entry: FileEntry) -> None:
-        # Arrange: pipeline will set ctx.is_success = True and provide payload
-        def execute_side_effect(ctx: ProcessingContext) -> None:
-            ctx.is_success = True
-            ctx.payload = TextPayload(text="hello", encoding="utf-8")
-            ctx.token_count = 42
+        # Arrange: pipeline will return a ProcessingResult with success
+        result = ProcessingResult()
+        result.is_success = True
+        result.payload = TextPayload(text="hello", encoding="utf-8")
+        result.token_count = 42
 
-        mock_pipeline.execute.side_effect = execute_side_effect
+        mock_pipeline.execute.return_value = result
 
         processor = EntryProcessor(mock_pipeline)
-        result = processor.process(entry)
+        proc_result = processor.process(entry)
 
-        assert isinstance(result, ProcessResult)
-        assert result.status == "success"
-        assert isinstance(result.payload, TextPayload)
-        assert result.payload.text == "hello"
-        assert result.token_count == 42
-        mock_pipeline.execute.assert_called_once()
-        # Check that context was created with entry
+        assert isinstance(proc_result, ProcessResult)
+        assert proc_result.status == "success"
+        assert isinstance(proc_result.payload, TextPayload)
+        assert proc_result.payload.text == "hello"
+        assert proc_result.token_count == 42
+
+        # Check that pipeline was called with ProcessingInput containing entry
         call_args = mock_pipeline.execute.call_args[0][0]
+        assert isinstance(call_args, ProcessingInput)
         assert call_args.entry is entry
-        # The context now has payload because side_effect modified it; we don't check payload here.
 
     def test_process_skipped(self, mock_pipeline: MagicMock, entry: FileEntry) -> None:
-        def execute_side_effect(ctx: ProcessingContext) -> None:
-            ctx.is_success = False
-            ctx.skip_code = "text_size_limit"
-            ctx.message = "too large"
+        result = ProcessingResult()
+        result.is_success = False
+        result.skip_code = "text_size_limit"
+        result.message = "too large"
 
-        mock_pipeline.execute.side_effect = execute_side_effect
+        mock_pipeline.execute.return_value = result
 
         processor = EntryProcessor(mock_pipeline)
-        result = processor.process(entry)
+        proc_result = processor.process(entry)
 
-        assert result.status == "skipped"
-        assert result.skip_code == "text_size_limit"
-        assert result.message == "too large"
-        assert result.payload is None
-        assert result.token_count is None
+        assert proc_result.status == "skipped"
+        assert proc_result.skip_code == "text_size_limit"
+        assert proc_result.message == "too large"
+        assert proc_result.payload is None
+        assert proc_result.token_count is None
 
     def test_process_error(self, mock_pipeline: MagicMock, entry: FileEntry) -> None:
-        def execute_side_effect(ctx: ProcessingContext) -> None:
-            ctx.is_success = False
-            ctx.error_code = "stat_error"
-            ctx.message = "stat failed"
+        result = ProcessingResult()
+        result.is_success = False
+        result.error_code = "stat_error"
+        result.message = "stat failed"
 
-        mock_pipeline.execute.side_effect = execute_side_effect
+        mock_pipeline.execute.return_value = result
 
         processor = EntryProcessor(mock_pipeline)
-        result = processor.process(entry)
+        proc_result = processor.process(entry)
 
-        assert result.status == "error"
-        assert result.error_code == "stat_error"
-        assert result.message == "stat failed"
-        assert result.payload is None
-        assert result.token_count is None
+        assert proc_result.status == "error"
+        assert proc_result.error_code == "stat_error"
+        assert proc_result.message == "stat failed"
+        assert proc_result.payload is None
+        assert proc_result.token_count is None
 
     def test_process_fallback_error(self, mock_pipeline: MagicMock, entry: FileEntry) -> None:
-        """If pipeline leaves no success/error/skip flags, fallback to error."""
-        def execute_side_effect(ctx: ProcessingContext) -> None:
-            # Nothing set
-            pass
+        """If pipeline returns no success/error/skip flags, fallback to error."""
+        result = ProcessingResult()
+        # Nothing set
 
-        mock_pipeline.execute.side_effect = execute_side_effect
+        mock_pipeline.execute.return_value = result
 
         processor = EntryProcessor(mock_pipeline)
-        result = processor.process(entry)
+        proc_result = processor.process(entry)
 
-        assert result.status == "error"
-        assert result.error_code == "unknown_error"
-        assert result.message == "Processing failed"
+        assert proc_result.status == "error"
+        assert proc_result.error_code == "unknown_error"
+        assert proc_result.message == "Processing failed"

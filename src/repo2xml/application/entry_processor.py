@@ -37,6 +37,6 @@ class EntryProcessor:
         else:
             return ProcessResult(
                 status="error",
-                error_code=result.error_code,
+                error_code=result.error_code or "unknown_error",
                 message=result.message or "Processing failed",
             )

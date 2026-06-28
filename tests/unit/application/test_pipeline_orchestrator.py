@@ -10,6 +10,7 @@ from repo2xml.application.entry_processor import EntryProcessor
 from repo2xml.application.pipeline_orchestrator import PipelineOrchestrator
 from repo2xml.application.statistics_collector import StatisticsCollector
 from repo2xml.application.writer_coordinator import WriterCoordinator
+from repo2xml.application.process_result import ProcessResult
 from repo2xml.config import (
     ExportConfig,
     Mode,
@@ -19,7 +20,7 @@ from repo2xml.config import (
     BinaryHandlingConfig,
     TextHandlingConfig,
 )
-from repo2xml.domain.model import FileEntry, TextPayload
+from repo2xml.domain.model import FileEntry, TextPayload, ProcessingInput, ProcessingResult
 
 
 class TestPipelineOrchestrator:
@@ -63,13 +64,11 @@ class TestPipelineOrchestrator:
         processor = MagicMock(spec=EntryProcessor)
 
         def process_side_effect(entry):
-            result = MagicMock()
-            result.status = "success"
-            result.payload = TextPayload(text=f"content of {entry.name}", encoding="utf-8")
-            result.token_count = 10
-            result.skip_code = None
-            result.error_code = None
-            result.message = None
+            result = ProcessResult(
+                status="success",
+                payload=TextPayload(text=f"content of {entry.name}", encoding="utf-8"),
+                token_count=10,
+            )
             return result
 
         processor.process.side_effect = process_side_effect
@@ -121,18 +120,13 @@ class TestPipelineOrchestrator:
     def test_execute_with_skipped(self, orchestrator, mock_processor, mock_stats) -> None:
         def process_side_effect(entry):
             if entry.name == "a.txt":
-                result = MagicMock()
-                result.status = "skipped"
-                result.skip_code = "text_size_limit"
-                result.message = "too large"
-                result.payload = None
-                return result
+                return ProcessResult(status="skipped", skip_code="text_size_limit", message="too large")
             else:
-                result = MagicMock()
-                result.status = "success"
-                result.payload = TextPayload(text="b", encoding="utf-8")
-                result.token_count = 5
-                return result
+                return ProcessResult(
+                    status="success",
+                    payload=TextPayload(text="b", encoding="utf-8"),
+                    token_count=5,
+                )
 
         mock_processor.process.side_effect = process_side_effect
         orchestrator.execute()
@@ -142,12 +136,7 @@ class TestPipelineOrchestrator:
 
     def test_execute_with_error(self, orchestrator, mock_processor, mock_stats) -> None:
         def process_side_effect(entry):
-            result = MagicMock()
-            result.status = "error"
-            result.error_code = "stat_error"
-            result.message = "stat failed"
-            result.payload = None
-            return result
+            return ProcessResult(status="error", error_code="stat_error", message="stat failed")
 
         mock_processor.process.side_effect = process_side_effect
         orchestrator.execute()
@@ -207,6 +196,4 @@ class TestPipelineOrchestrator:
         mock_processor.process.side_effect = KeyboardInterrupt()
         with pytest.raises(KeyboardInterrupt):
             orchestrator.execute()
-        # The writer is closed automatically via context manager; we don't call .close() directly.
-        # Instead we check that __exit__ was called.
         mock_writer.__exit__.assert_called()
