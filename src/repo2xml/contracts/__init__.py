@@ -20,6 +20,7 @@ from .serialize import (
 from .tokenize import TokenCounter, TokenCounterFactory
 from .progress import ProgressReporter
 from .stats import StatsProvider
+from .policies import FilePolicy
 
 __all__ = [
     "ScannerLike",
@@ -36,4 +37,5 @@ __all__ = [
     "TokenCounterFactory",
     "ProgressReporter",
     "StatsProvider",
+    "FilePolicy",
 ]

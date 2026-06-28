@@ -12,13 +12,13 @@ import logging
 from pathlib import Path
 from typing import BinaryIO, List, Optional
 
-from repo2xml.contracts import ProgressReporter, StatsProvider
+from repo2xml.contracts import ProgressReporter, StatsProvider, FilePolicy
 from repo2xml.application.entry_processor import EntryProcessor
 from repo2xml.application.pipeline_orchestrator import PipelineOrchestrator
 from repo2xml.application.policies import ExportPayloadBuilder
 from repo2xml.application.statistics_collector import StatisticsCollector
 from repo2xml.application.writer_coordinator import WriterCoordinator
-from repo2xml.config import ExportConfig
+from repo2xml.config import ExportConfig, Mode, SymlinkFilesMode
 from repo2xml.services.classify import ClassificationEngine
 from repo2xml.services.ingest.ingestor import StandardIngestor
 from repo2xml.services.ingest.redact import RedactionEngine
@@ -27,6 +27,15 @@ from repo2xml.services.scan.gitignore import GitignoreEngine
 from repo2xml.services.scan.registry import create_scanner
 from repo2xml.services.serialize.factory import get_format_factory
 from repo2xml.services.tokenize import create_token_counter
+
+# Import the new policy implementations
+from repo2xml.services.policies import (
+    SymlinkPolicy,
+    ModePolicy,
+    ErrorPolicy,
+    BinaryPolicy,
+    TextPolicy,
+)
 
 logger = logging.getLogger("repo2xml.component_factory")
 
@@ -102,14 +111,11 @@ class ExportComponentFactory:
                 model=config.token.model,
             )
 
+        # --- Build the policy chain ---
+        policies = self._build_policies(config, ingestor)
+
         # --- Payload builder ---
-        payload_builder = ExportPayloadBuilder(
-            mode=config.mode,
-            binary=config.binary,
-            text=config.text,
-            symlinks_files=config.scan.symlinks_files,
-            ingestor=ingestor,
-        )
+        payload_builder = ExportPayloadBuilder(policies)
 
         # --- Serializer ---
         factory = get_format_factory(config.format)
@@ -132,12 +138,9 @@ class ExportComponentFactory:
 
         # --- Statistics collector ---
         providers: List[StatsProvider] = []
-        # Add all components that provide stats
         providers.append(classification_engine)   # implements StatsProvider
         if redaction_engine is not None:
             providers.append(redaction_engine)    # implements StatsProvider
-        # Scanner stats are handled via the scanner object; we'll add it later via the pipeline
-        # but the scanner itself will be used as a StatsProvider in the pipeline.
 
         collector = StatisticsCollector(
             token_counting_enabled=config.token.enabled and token_counter is not None,
@@ -166,6 +169,50 @@ class ExportComponentFactory:
         )
 
         return orchestrator, collector
+
+    def _build_policies(self, config: ExportConfig, ingestor: StandardIngestor) -> List[FilePolicy]:
+        """
+        Build the ordered list of file policies based on the current configuration.
+
+        The order is critical and determines which policy gets first chance to
+        handle a file. The current order is:
+        1. SymlinkPolicy (if not following symlinks)
+        2. ModePolicy (only for metadata mode, which short-circuits)
+        3. ErrorPolicy (handles classification errors)
+        4. BinaryPolicy (for binary files)
+        5. TextPolicy (for text files)
+
+        For metadata mode, only ModePolicy is used (all files become MetadataPayload).
+        """
+        policies: List[FilePolicy] = []
+
+        # Special case: metadata mode – only ModePolicy applies
+        if config.mode == Mode.metadata:
+            policies.append(ModePolicy(config.mode))
+            return policies
+
+        # For full mode, build the full chain
+        # 1. Symlink handling (if not following)
+        if config.scan.symlinks_files != SymlinkFilesMode.follow:
+            policies.append(SymlinkPolicy(config.scan.symlinks_files))
+
+        # 2. Mode policy (for full mode it will always return None, but we keep it for clarity;
+        #    actually we don't need it in full mode, but we can include it – it will just return None)
+        #    We'll skip it because it would only add overhead; but we keep it for consistency?
+        #    In the original design, ModePolicy was only for metadata. For full, it returns None.
+        #    We can omit it to keep the chain clean.
+        #    However, if we ever add other modes, we might need it. For now, we'll skip it.
+
+        # 3. Error policy
+        policies.append(ErrorPolicy())
+
+        # 4. Binary policy
+        policies.append(BinaryPolicy(config.binary, ingestor))
+
+        # 5. Text policy
+        policies.append(TextPolicy(config.text, ingestor))
+
+        return policies
 
     @staticmethod
     def _null_reporter() -> ProgressReporter:
