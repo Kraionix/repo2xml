@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict
 from repo2xml.domain.exceptions import ConfigurationError
 
 if TYPE_CHECKING:
-    from repo2xml.application.contracts import ScannerLike
+    from repo2xml.contracts import ScannerLike
 
 # Type alias for factory functions that create a ScannerLike instance.
 ScannerFactory = Callable[..., "ScannerLike"]

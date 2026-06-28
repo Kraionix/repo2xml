@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Iterable, Optional
 
-from repo2xml.application.contracts import ProgressReporter
+from repo2xml.contracts import ProgressReporter
 from repo2xml.application.entry_processor import EntryProcessor
 from repo2xml.application.statistics_collector import StatisticsCollector
 from repo2xml.application.writer_coordinator import WriterCoordinator
@@ -37,18 +37,9 @@ class FileProcessingEngine:
         self.write_enabled = write_enabled
 
     def process(self, entries: Iterable[FileEntry]) -> None:
-        """
-        Process all entries in the iterable.
-
-        Raises:
-            KeyboardInterrupt: propagated after handling partial state.
-        """
         try:
             for entry in entries:
-                # Update progress with the current file name
                 self.progress.set_postfix(entry.name)
-
-                # Process the entry
                 result = self.entry_processor.process(entry)
 
                 if result.status == "success":
@@ -79,5 +70,4 @@ class FileProcessingEngine:
 
         except KeyboardInterrupt:
             logger.warning("Interrupted during file processing.")
-            # Re-raise so that the orchestrator can clean up resources.
             raise

@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import BinaryIO
 
-from repo2xml.application.contracts import ProgressReporter
+from repo2xml.contracts import ProgressReporter
 from repo2xml.config import RestoreConfig
 from repo2xml.domain.model import RestoreStats
 from repo2xml.services.restore.restorer import FilesystemRestorer
@@ -23,10 +23,8 @@ class RestorePipeline:
     def execute(self, input_stream: BinaryIO, output_root: Path, progress: ProgressReporter) -> RestoreStats:
         progress.set_phase("Parsing")
         progress.set_total(None)
-        # Pass the strict flag from the restore configuration
         repository = self.deserializer.parse(input_stream, strict=self.config.strict_validation)
         progress.set_phase("Restoring")
-        # The number of files isn't known until we consume, but we can provide an indeterminate bar.
         restorer = FilesystemRestorer(
             output_root,
             overwrite=self.config.overwrite,
@@ -36,7 +34,7 @@ class RestorePipeline:
             allow_absolute_symlinks=self.config.allow_absolute_symlinks,
         )
         stats = restorer.restore(repository.files)
-        progress.set_total(stats.files_total)  # adjust for display
+        progress.set_total(stats.files_total)
         progress.advance(stats.files_total)
         progress.finish()
         return stats

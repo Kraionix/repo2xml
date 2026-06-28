@@ -10,16 +10,15 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import BinaryIO, Optional
+from typing import BinaryIO, List, Optional
 
-from repo2xml.application.contracts import ProgressReporter
+from repo2xml.contracts import ProgressReporter, StatsProvider
 from repo2xml.application.entry_processor import EntryProcessor
 from repo2xml.application.pipeline_orchestrator import PipelineOrchestrator
 from repo2xml.application.policies import ExportPayloadBuilder
 from repo2xml.application.statistics_collector import StatisticsCollector
 from repo2xml.application.writer_coordinator import WriterCoordinator
 from repo2xml.config import ExportConfig
-from repo2xml.domain.model import ExportStats
 from repo2xml.services.classify import ClassificationEngine
 from repo2xml.services.ingest.ingestor import StandardIngestor
 from repo2xml.services.ingest.redact import RedactionEngine
@@ -52,12 +51,6 @@ class ExportComponentFactory:
         self.progress = progress or self._null_reporter()
 
     def build(self) -> tuple[PipelineOrchestrator, StatisticsCollector]:
-        """
-        Build and wire all export components.
-
-        Returns:
-            A tuple of (PipelineOrchestrator, StatisticsCollector).
-        """
         config = self.config
         root = self.root_path
         reporter = self.progress
@@ -138,8 +131,17 @@ class ExportComponentFactory:
         )
 
         # --- Statistics collector ---
+        providers: List[StatsProvider] = []
+        # Add all components that provide stats
+        providers.append(classification_engine)   # implements StatsProvider
+        if redaction_engine is not None:
+            providers.append(redaction_engine)    # implements StatsProvider
+        # Scanner stats are handled via the scanner object; we'll add it later via the pipeline
+        # but the scanner itself will be used as a StatsProvider in the pipeline.
+
         collector = StatisticsCollector(
             token_counting_enabled=config.token.enabled and token_counter is not None,
+            providers=providers,
         )
 
         # --- Entry processor ---

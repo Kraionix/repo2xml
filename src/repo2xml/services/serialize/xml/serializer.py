@@ -5,7 +5,7 @@ import html
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-from repo2xml.application.contracts import (
+from repo2xml.contracts import (
     DocumentMetadataWriter,
     FileContentWriter,
     FileSectionWriter,

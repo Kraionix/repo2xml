@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import BinaryIO, Iterator, List, Optional, Tuple
 from xml.etree import ElementTree as ET
 
-from repo2xml.application.contracts import Deserializer
+from repo2xml.contracts import Deserializer
 from repo2xml.domain.exceptions import DeserializationError
 from repo2xml.domain.model import (
     BinaryBase64Payload,

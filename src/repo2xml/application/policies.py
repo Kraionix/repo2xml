@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from repo2xml.application.contracts import IngestorLike
+from repo2xml.contracts import IngestorLike
 from repo2xml.config import (
     BinaryHandlingConfig,
     BinaryMode,

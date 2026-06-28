@@ -8,6 +8,7 @@ import typer
 from rich.console import Console
 
 from repo2xml.cli.actions import execute_export, execute_restore
+from repo2xml.cli.options import ExportOptions
 from repo2xml.cli.ui import LogLevel, setup_logging
 from repo2xml.config import (
     BinaryMode,
@@ -19,6 +20,7 @@ from repo2xml.config import (
     SymlinkFilesMode,
 )
 from repo2xml.services.output.targets import CompressMode
+from repo2xml.utils.version import tool_version
 
 app = typer.Typer(add_completion=False)
 
@@ -64,18 +66,20 @@ def main(
     source_option: Optional[List[str]] = typer.Option(None, "--source-option", help="Extra key=value pairs for the scanner."),
     redact_config: Optional[Path] = typer.Option(None, "--redact-config", help="Path to YAML file with redaction rules.", exists=True, file_okay=True, dir_okay=False, resolve_path=True),
     classify_config: Optional[Path] = typer.Option(None, "--classify-config", help="Path to YAML file with classification rules.", exists=True, file_okay=True, dir_okay=False, resolve_path=True),
-    # Token counting options
     count_tokens: bool = typer.Option(False, "--count-tokens/--no-count-tokens", help="Count tokens in text files."),
     tokenizer_model: str = typer.Option("deepseek-ai/DeepSeek-V4-Pro", "--tokenizer-model", help="Hugging Face model for tokenization."),
-    # Verbose error reporting
     verbose_errors: bool = typer.Option(False, "--verbose-errors", help="Show detailed error examples in reports."),
 ) -> None:
     """repo2xml: convert a repository into a single context document for LLM ingestion."""
     console = Console(no_color=no_color)
     logger = setup_logging(log_level, no_color=no_color)
-    execute_export(
-        console=console,
-        version=version,
+
+    if version:
+        typer.echo(f"repo2xml {tool_version('repo2xml')}")
+        raise typer.Exit(code=0)
+
+    # Build options object
+    options = ExportOptions(
         path=path,
         output=output,
         stdout=stdout,
@@ -92,10 +96,11 @@ def main(
         progress=progress,
         report=report,
         redact=redact,
-        log_level=log_level,
+        log_level=log_level.value,
         validate_xml=validate_xml,
         quiet=quiet,
         no_color=no_color,
+        verbose_errors=verbose_errors,
         size_min=size_min,
         size_max=size_max,
         newer_than=newer_than,
@@ -116,8 +121,9 @@ def main(
         classify_config=classify_config,
         count_tokens=count_tokens,
         tokenizer_model=tokenizer_model,
-        verbose_errors=verbose_errors,
     )
+
+    execute_export(console=console, options=options)
 
 
 @app.command("restore")

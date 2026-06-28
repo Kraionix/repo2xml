@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
-from repo2xml.application.contracts import ScannerLike
+from repo2xml.contracts import ScannerLike
 from repo2xml.application.filters import apply_file_filters
 from repo2xml.config import ExportConfig
 from repo2xml.domain.model import FileEntry
@@ -33,13 +33,6 @@ class ScannerService:
         self.config = config
 
     def scan(self, root_path: Path) -> ScanResult:
-        """
-        Perform the scan, apply filters, and return the result.
-
-        The scanner is expected to yield FileEntry objects.  We materialise
-        the entries into a list so that filtering and later structure writing
-        can work with a stable collection.
-        """
         entries: List[FileEntry] = []
         for entry in self.scanner.scan():
             entries.append(entry)

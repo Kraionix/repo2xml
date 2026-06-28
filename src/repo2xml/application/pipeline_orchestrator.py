@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
-from repo2xml.application.contracts import ProgressReporter, ScannerLike
+from repo2xml.contracts import ProgressReporter, ScannerLike
 from repo2xml.application.entry_processor import EntryProcessor
 from repo2xml.application.file_processing_engine import FileProcessingEngine
 from repo2xml.application.scanner_service import ScannerService
@@ -71,8 +71,6 @@ class PipelineOrchestrator:
 
         if warnings:
             logger.warning("Scan warnings: %s", warnings)
-            # count warnings approximately – progress reporter expects a count
-            # We'll just set it to 1 if any, but we can parse the summary if needed.
             self.progress.set_warning_count(1)
 
         total = len(entries)
@@ -131,12 +129,7 @@ class PipelineOrchestrator:
                 try:
                     engine.process(entries)
                 except KeyboardInterrupt:
-                    # Interrupt caught; close the writer gracefully if possible.
-                    # The context manager will handle the final close, but we
-                    # still need to ensure the files section is closed properly.
-                    # We'll let the context manager do the cleanup.
                     logger.warning("Export interrupted by user. Finishing partial document.")
-                    # Re-raise so that the outer handler can exit.
                     raise
 
             # ------------------------------------------------------------------

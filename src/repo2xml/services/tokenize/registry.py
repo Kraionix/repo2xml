@@ -2,7 +2,7 @@
 """Registry for tokenizer factories (lazy, no heavy imports)."""
 
 from typing import Dict, Any
-from repo2xml.application.contracts import TokenCounter, TokenCounterFactory
+from repo2xml.contracts import TokenCounter, TokenCounterFactory
 from repo2xml.domain.exceptions import ConfigurationError
 
 _TOKENIZER_FACTORY_REGISTRY: Dict[str, TokenCounterFactory] = {}

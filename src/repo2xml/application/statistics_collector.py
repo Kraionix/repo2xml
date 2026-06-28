@@ -1,8 +1,9 @@
 # src/repo2xml/application/statistics_collector.py
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Any
 
+from repo2xml.contracts import StatsProvider
 from repo2xml.domain.model import ExportStats, TokenStats
 from repo2xml.services.scan.scanner import ScanStats
 
@@ -12,10 +13,16 @@ class StatisticsCollector:
     Aggregates statistics during the export process.
 
     Maintains counters for processed, skipped, and errored files,
-    as well as token-related statistics if token counting is enabled.
+    as well as token‑related statistics. It also collects statistics
+    from any registered StatsProvider components.
     """
 
-    def __init__(self, *, token_counting_enabled: bool = False):
+    def __init__(
+        self,
+        *,
+        token_counting_enabled: bool = False,
+        providers: Optional[List[StatsProvider]] = None,
+    ):
         # Counters
         self._total_processed = 0
         self._total_skipped = 0
@@ -27,10 +34,8 @@ class StatisticsCollector:
         self._token_stats: Optional[TokenStats] = TokenStats() if token_counting_enabled else None
         self._token_counting_enabled = token_counting_enabled
 
-        # Redaction, classification, and scan stats (optional)
-        self._redaction_stats: Optional[object] = None
-        self._classification_stats: Optional[object] = None
-        self._scan_stats: Optional[ScanStats] = None
+        # Stats providers – will be queried when building final stats
+        self._providers: List[StatsProvider] = providers or []
 
     def record_success(self, token_count: Optional[int] = None, ext: str = "") -> None:
         """Record a successfully processed file."""
@@ -48,30 +53,33 @@ class StatisticsCollector:
                 self._token_stats.min_tokens = token_count
 
     def record_skipped(self, skip_code: str, message: Optional[str] = None) -> None:
-        """Record a skipped file with a skip code."""
         self._total_skipped += 1
         self._skipped_by_code[skip_code] = self._skipped_by_code.get(skip_code, 0) + 1
 
     def record_error(self, error_code: str, message: Optional[str] = None) -> None:
-        """Record an error with an error code."""
         self._total_errors += 1
         self._errors_by_code[error_code] = self._errors_by_code.get(error_code, 0) + 1
 
-    def set_redaction_stats(self, stats: object) -> None:
-        """Store redaction statistics (if any)."""
-        self._redaction_stats = stats
-
-    def set_classification_stats(self, stats: object) -> None:
-        """Store classification statistics (if any)."""
-        self._classification_stats = stats
-
-    def set_scan_stats(self, stats: ScanStats) -> None:
-        """Store scan statistics (if any)."""
-        self._scan_stats = stats
-
     def get_export_stats(self, scan_warning_summary: Optional[str] = None) -> ExportStats:
-        """Return the final ExportStats object."""
-        token_stats = self._token_stats
+        """Return the final ExportStats object, including stats from all providers."""
+        # Gather stats from providers
+        redaction_stats = None
+        classification_stats = None
+        scan_stats = None
+
+        for provider in self._providers:
+            stats = provider.get_stats()
+            # Heuristic: inspect keys to assign to known fields
+            if "total_files_processed" in stats or "matches_by_rule" in stats:
+                redaction_stats = stats
+            elif "total_files" in stats and "by_extension" in stats:
+                classification_stats = stats
+            elif "dirs_scandir_errors" in stats or "errors_by_type" in stats:
+                # Convert dict to a ScanStats object if needed, or keep as dict
+                scan_stats = stats
+
+        # If scan_stats is a dict, we might want to convert it to ScanStats,
+        # but ExportStats accepts Any, so we can keep it as dict.
         return ExportStats(
             files_total=self._total_processed + self._total_skipped + self._total_errors,
             files_emitted=self._total_processed,
@@ -80,14 +88,13 @@ class StatisticsCollector:
             skipped_by_code=dict(self._skipped_by_code),
             errors_by_code=dict(self._errors_by_code),
             scan_warning_summary=scan_warning_summary,
-            redaction_stats=self._redaction_stats,
-            classification_stats=self._classification_stats,
-            token_stats=token_stats,
-            scan_stats=self._scan_stats,
+            redaction_stats=redaction_stats,
+            classification_stats=classification_stats,
+            token_stats=self._token_stats,
+            scan_stats=scan_stats,
         )
 
     def reset(self) -> None:
-        """Reset all counters (useful for testing)."""
         self._total_processed = 0
         self._total_skipped = 0
         self._total_errors = 0
@@ -97,6 +104,3 @@ class StatisticsCollector:
             self._token_stats = TokenStats()
         else:
             self._token_stats = None
-        self._redaction_stats = None
-        self._classification_stats = None
-        self._scan_stats = None

@@ -16,29 +16,20 @@ from repo2xml.services.serialize.xml.format_spec import XmlFormatSpec
 class XMLStructureValidator:
     """Validator that ensures the XML document conforms to the expected structure."""
 
-    # Supported schema versions that can be parsed
     SUPPORTED_VERSIONS = {"1.0", "1.1", "1.2"}
 
     def __init__(self, root: Element):
-        """
-        Args:
-            root: The root element of the parsed XML tree.
-        """
         self.root = root
 
     def validate(self) -> None:
-        """
-        Run all validation checks. Raises DeserializationError on first failure.
-        """
         self._check_root()
         self._check_meta()
         self._check_project_structure()
         self._check_files()
         self._check_statistics()
-        # Additional checks can be added here as the schema evolves
+        self._check_business_rules()
 
     def _check_root(self) -> None:
-        """Verify the root element tag and schema version."""
         if self.root.tag != XmlFormatSpec.TAG_ROOT:
             raise DeserializationError(
                 f"Unexpected root element: {self.root.tag}. Expected: {XmlFormatSpec.TAG_ROOT}"
@@ -53,39 +44,26 @@ class XMLStructureValidator:
             )
 
     def _check_meta(self) -> None:
-        """Ensure the <meta> element is present and has required children."""
         meta = self.root.find(XmlFormatSpec.TAG_META)
         if meta is None:
             raise DeserializationError("Missing <meta> element")
-        # root_path is mandatory for reliable restoration
         if meta.find(XmlFormatSpec.TAG_ROOT_PATH) is None:
             raise DeserializationError("Missing <root_path> inside <meta>")
 
     def _check_project_structure(self) -> None:
-        """
-        Validate the <project_structure> section:
-        - Must be present.
-        - May be empty.
-        - Only <dir> and <file> elements allowed.
-        - Path attributes must not contain path traversal (..).
-        """
         struct = self.root.find(XmlFormatSpec.TAG_PROJECT_STRUCTURE)
         if struct is None:
             raise DeserializationError("Missing <project_structure> element")
         self._validate_structure_element(struct, current_path="")
 
     def _validate_structure_element(self, element: Element, current_path: str) -> None:
-        """Recursively check directory and file entries."""
         for child in element:
             if child.tag == XmlFormatSpec.TAG_DIR:
                 name = child.get(XmlFormatSpec.ATTR_NAME)
                 if not name:
                     raise DeserializationError("Directory entry missing 'name' attribute")
-                # Build new path for context (not stored, just used for error messages)
                 dir_path = f"{current_path}/{name}" if current_path else name
-                # Prevent path traversal attempts
                 self._check_path_safety(child.get(XmlFormatSpec.ATTR_PATH, dir_path))
-                # Recurse into subdirectories
                 self._validate_structure_element(child, dir_path)
             elif child.tag == XmlFormatSpec.TAG_FILE:
                 path_attr = child.get(XmlFormatSpec.ATTR_PATH)
@@ -98,27 +76,17 @@ class XMLStructureValidator:
                 )
 
     def _check_files(self) -> None:
-        """
-        Validate the <files> section if present (mandatory for non-structure modes).
-        - Every <file> must have a 'path' attribute.
-        - Path must not contain '..'.
-        - The combination of attributes must allow payload classification.
-        - If 'tokens' attribute is present, it must be a non-negative integer.
-        """
         files_el = self.root.find(XmlFormatSpec.TAG_FILES)
         if files_el is None:
-            # Could be a structure-only export; that's fine
             return
-
         for file_el in files_el:
             if file_el.tag != XmlFormatSpec.TAG_FILE:
-                continue  # skip non-file elements (should not happen)
+                continue
             path_attr = file_el.get(XmlFormatSpec.ATTR_PATH)
             if not path_attr:
                 raise DeserializationError("File entry in <files> missing 'path' attribute")
             self._check_path_safety(path_attr)
 
-            # Validate tokens attribute if present
             tokens_attr = file_el.get(XmlFormatSpec.ATTR_TOKENS)
             if tokens_attr is not None:
                 try:
@@ -128,8 +96,6 @@ class XMLStructureValidator:
                 except ValueError:
                     raise DeserializationError(f"Invalid tokens attribute for '{path_attr}': {tokens_attr}")
 
-            # Attempt to classify the payload; this verifies that the attribute
-            # combination is valid (no contradictory flags).
             attrs = dict(file_el.attrib)
             content_el = file_el.find(XmlFormatSpec.TAG_CONTENT)
             content_info = None
@@ -143,14 +109,9 @@ class XMLStructureValidator:
                 ) from exc
 
     def _check_statistics(self) -> None:
-        """
-        Validate the optional <statistics> element:
-        - If present, must have a 'total_tokens' attribute.
-        - total_tokens must be a non-negative integer.
-        """
         stats_el = self.root.find(XmlFormatSpec.TAG_STATISTICS)
         if stats_el is None:
-            return  # optional, fine
+            return
         total_attr = stats_el.get(XmlFormatSpec.ATTR_TOTAL_TOKENS)
         if total_attr is None:
             raise DeserializationError("Missing 'total_tokens' attribute in <statistics>")
@@ -161,12 +122,55 @@ class XMLStructureValidator:
         except ValueError:
             raise DeserializationError(f"Invalid total_tokens value: {total_attr}")
 
+    def _check_business_rules(self) -> None:
+        """
+        Enforce semantic rules beyond structural correctness.
+        """
+        files_el = self.root.find(XmlFormatSpec.TAG_FILES)
+        if files_el is None:
+            # If mode is 'structure', this is allowed; we can't easily get mode here,
+            # but we can check consistency of files section.
+            return
+
+        for file_el in files_el:
+            if file_el.tag != XmlFormatSpec.TAG_FILE:
+                continue
+            attrs = file_el.attrib
+            binary = attrs.get(XmlFormatSpec.ATTR_BINARY) == "true"
+            tokens = attrs.get(XmlFormatSpec.ATTR_TOKENS)
+            skipped = attrs.get(XmlFormatSpec.ATTR_SKIPPED) == "true"
+            error_el = file_el.find(XmlFormatSpec.TAG_ERROR)
+            content_el = file_el.find(XmlFormatSpec.TAG_CONTENT)
+
+            # 1. If binary=true, tokens must not be present
+            if binary and tokens is not None:
+                raise DeserializationError(
+                    f"File '{attrs.get('path', '')}' has binary='true' and tokens attribute; "
+                    "binary files cannot have token counts."
+                )
+
+            # 2. If tokens present, file must be text (not binary) and have content
+            if tokens is not None and binary:
+                # already covered above
+                pass
+
+            # 3. If skipped=true, must have an <error> element
+            if skipped and error_el is None:
+                raise DeserializationError(
+                    f"File '{attrs.get('path', '')}' is skipped but missing <error> element."
+                )
+
+            # 4. If content is present and binary is false, it should be text (encoding not base64)
+            if content_el is not None and not binary:
+                enc = content_el.get(XmlFormatSpec.ATTR_ENCODING)
+                if enc == "base64":
+                    raise DeserializationError(
+                        f"File '{attrs.get('path', '')}' is not marked binary but content has base64 encoding."
+                    )
+                # If no encoding, it's okay (assumed text)
+
     @staticmethod
     def _check_path_safety(path: str) -> None:
-        """
-        Reject paths that attempt to escape the repository root via '..'.
-        This is a basic safety net; final security is ensured by the restorer.
-        """
         if ".." in path.split("/"):
             raise DeserializationError(
                 f"Path contains parent directory traversal: '{path}'"

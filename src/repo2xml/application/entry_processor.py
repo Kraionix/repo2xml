@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Optional, TYPE_CHECKING
 
+from repo2xml.contracts import IngestorLike
 from repo2xml.application.process_result import ProcessResult
 from repo2xml.application.policies import ExportPayloadBuilder
 from repo2xml.config import ExportConfig
@@ -11,9 +12,6 @@ from repo2xml.domain.model import ErrorPayload, FileEntry, SkippedPayload, TextP
 from repo2xml.services.classify import ClassificationEngine
 from repo2xml.services.ingest.redact import RedactionEngine
 from repo2xml.services.tokenize import TokenCounter
-
-if TYPE_CHECKING:
-    from repo2xml.application.contracts import IngestorLike
 
 logger = logging.getLogger("repo2xml.entry_processor")
 
@@ -53,24 +51,13 @@ class EntryProcessor:
         else:
             self.payload_builder = payload_builder
 
-        # Determine if token counting is enabled
         self._token_counting_enabled = config.token.enabled and self.token_counter is not None
 
     def process(self, entry: FileEntry) -> ProcessResult:
-        """
-        Process a single file entry.
-
-        Returns:
-            ProcessResult with status, payload (if success), and metadata.
-        """
         try:
-            # 1. Classify the file
             classification = self.classification_engine.classify(entry)
-
-            # 2. Build payload (this may involve reading content)
             payload = self.payload_builder.build(entry, classification)
 
-            # 3. Handle payload that is not success (skip or error)
             if isinstance(payload, SkippedPayload):
                 return ProcessResult(
                     status="skipped",
@@ -84,12 +71,12 @@ class EntryProcessor:
                     message=payload.message,
                 )
 
-            # 4. Apply redaction if enabled and payload is TextPayload
+            # Redaction
             if self.redaction_engine is not None and isinstance(payload, TextPayload):
                 new_text = self.redaction_engine.process(entry, payload.text)
                 payload = TextPayload(text=new_text, encoding=payload.encoding)
 
-            # 5. Count tokens if enabled and payload is TextPayload
+            # Token counting
             token_count: Optional[int] = None
             if self._token_counting_enabled and isinstance(payload, TextPayload):
                 try:
@@ -102,7 +89,6 @@ class EntryProcessor:
                         message=f"Tokenization error: {e}",
                     )
 
-            # 6. Success
             return ProcessResult(
                 status="success",
                 payload=payload,

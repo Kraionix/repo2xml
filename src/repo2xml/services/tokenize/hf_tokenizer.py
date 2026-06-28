@@ -5,7 +5,7 @@ import logging
 from typing import Optional, Dict, Any
 
 from repo2xml.domain.model import TokenStats
-from repo2xml.application.contracts import TokenCounter
+from repo2xml.contracts import TokenCounter
 
 logger = logging.getLogger("repo2xml.tokenizer")
 

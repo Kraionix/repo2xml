@@ -4,7 +4,7 @@ Token counting subsystem – lazy‑loaded tokenizer factories and counters.
 """
 
 from repo2xml.services.tokenize.registry import create_token_counter, register_tokenizer_factory
-from repo2xml.application.contracts import TokenCounter, TokenCounterFactory
+from repo2xml.contracts import TokenCounter, TokenCounterFactory
 
 # Hugging Face implementation – imported dynamically inside the factory
 # to avoid pulling heavy dependencies at import time.

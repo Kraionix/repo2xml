@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Dict, Type
 
-from repo2xml.application.contracts import FormatFactory
+from repo2xml.contracts import FormatFactory
 from repo2xml.domain.exceptions import SerializationError
 
 

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, List, Optional, Union
 
-from repo2xml.application.contracts import ProgressReporter
+from repo2xml.contracts import ProgressReporter
 from repo2xml.application.factories import ExportComponentFactory
 from repo2xml.application.statistics_collector import StatisticsCollector
 from repo2xml.application.filters import apply_file_filters
@@ -62,29 +62,19 @@ class RepoXML:
         dry_run: bool = False,
         stats_only: bool = False,
     ) -> ExportStats:
-        """Export a repository to the given output stream."""
         if not isinstance(self.config, ExportConfig):
             raise FacadeError("Export operation requires ExportConfig")
 
         config: ExportConfig = self.config
 
-        # ------------------------------------------------------------------
-        # 1. Pre-flight validation
-        # ------------------------------------------------------------------
         root = root_path.resolve()
         self._validate_root_path(root)
         self._validate_dependencies(config)
 
-        # ------------------------------------------------------------------
-        # 2. Build all components via factory
-        # ------------------------------------------------------------------
         output_target = StreamTarget(output_stream)
         factory = ExportComponentFactory(config, root, output_target, progress)
         orchestrator, collector = factory.build()
 
-        # ------------------------------------------------------------------
-        # 3. Run the pipeline
-        # ------------------------------------------------------------------
         try:
             stats = orchestrator.execute(stats_only=stats_only)
         except KeyboardInterrupt:
@@ -95,19 +85,13 @@ class RepoXML:
 
         return stats
 
-    # ------------------------------------------------------------------
-    # Private helper methods
-    # ------------------------------------------------------------------
-
     def _validate_root_path(self, root: Path) -> None:
-        """Check that root exists and is readable."""
         if not root.is_dir():
             raise ConfigurationError(f"Root path is not a directory: {root}")
         if not os.access(root, os.R_OK):
             raise ConfigurationError(f"Root path is not readable: {root}")
 
     def _validate_dependencies(self, config: ExportConfig) -> None:
-        """Check optional dependencies if their features are enabled."""
         if config.token.enabled:
             try:
                 import transformers  # noqa: F401
@@ -117,12 +101,7 @@ class RepoXML:
                     "Install with: pip install repo2xml[tokens]"
                 )
 
-    # ------------------------------------------------------------------
-    # Other public methods
-    # ------------------------------------------------------------------
-
     def filtered_scan(self, root_path: Path) -> List[FileEntry]:
-        """Return filtered list of files without performing a full export."""
         if not isinstance(self.config, ExportConfig):
             raise FacadeError("filtered_scan requires ExportConfig")
         config: ExportConfig = self.config
@@ -151,7 +130,6 @@ class RepoXML:
         return entries
 
     def export_to_bytes(self, root_path: Path) -> bytes:
-        """Export the repository to an in-memory bytes buffer."""
         buf = io.BytesIO()
         self.export(root_path, buf)
         return buf.getvalue()
@@ -163,7 +141,6 @@ class RepoXML:
         *,
         progress: Optional[ProgressReporter] = None,
     ) -> RestoreStats:
-        """Restore a repository from an XML stream."""
         if not isinstance(self.config, RestoreConfig):
             raise FacadeError("Restore operation requires RestoreConfig")
         from repo2xml.application.restore_pipeline import RestorePipeline
@@ -172,12 +149,10 @@ class RepoXML:
         return pipeline.execute(input_stream, output_root, reporter)
 
     def restore_from_path(self, xml_path: Path, output_root: Path) -> RestoreStats:
-        """Restore a repository from an XML file."""
         with open(xml_path, "rb") as fh:
             return self.restore(fh, output_root)
 
 
-# Alias for backward compatibility
 Repo2XML = RepoXML
 
 
