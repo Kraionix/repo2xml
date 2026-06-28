@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
-from repo2xml.contracts import ProgressReporter, StatsProvider
+from repo2xml.contracts import FilePolicy, ProgressReporter, StatsProvider
 from repo2xml.application.entry_processor import EntryProcessor
 from repo2xml.application.pipeline import Pipeline
 from repo2xml.application.pipeline_orchestrator import PipelineOrchestrator
@@ -13,7 +13,7 @@ from repo2xml.application.services import ProcessingServices
 from repo2xml.application.statistics_collector import StatisticsCollector
 from repo2xml.application.step_factory import StepFactory
 from repo2xml.application.writer_coordinator import WriterCoordinator
-from repo2xml.config import ExportConfig
+from repo2xml.config import ExportConfig, Mode, SymlinkFilesMode
 from repo2xml.services.classify import ClassificationEngine
 from repo2xml.services.ingest.ingestor import StandardIngestor
 from repo2xml.services.ingest.redact import RedactionEngine
@@ -22,6 +22,15 @@ from repo2xml.services.scan.gitignore import GitignoreEngine
 from repo2xml.services.scan.registry import create_scanner
 from repo2xml.services.serialize.factory import get_format_factory
 from repo2xml.services.tokenize import create_token_counter
+
+# Import the policy implementations
+from repo2xml.services.policies import (
+    SymlinkPolicy,
+    ModePolicy,
+    ErrorPolicy,
+    BinaryPolicy,
+    TextPolicy,
+)
 
 logger = logging.getLogger("repo2xml.component_factory")
 
@@ -97,7 +106,10 @@ class ExportComponentFactory:
                 model=config.token.model,
             )
 
-        # --- Processing services ---
+        # --- Build the policy chain ---
+        policies = self._build_policies(config, ingestor)
+
+        # --- Processing services (dependencies for steps) ---
         services = ProcessingServices(
             classification_engine=classification_engine,
             ingestor=ingestor,
@@ -106,7 +118,7 @@ class ExportComponentFactory:
         )
 
         # --- Step factory and pipeline ---
-        step_factory = StepFactory(config, services)
+        step_factory = StepFactory(config, services, policies)
         steps = step_factory.create_steps()
         pipeline = Pipeline(steps)
         entry_processor = EntryProcessor(pipeline)
@@ -153,6 +165,41 @@ class ExportComponentFactory:
         )
 
         return orchestrator, collector
+
+    def _build_policies(self, config: ExportConfig, ingestor: StandardIngestor) -> List[FilePolicy]:
+        """
+        Build the ordered list of file policies based on the current configuration.
+
+        The order is critical and determines which policy gets first chance to
+        handle a file. The current order is:
+        1. SymlinkPolicy (if not following symlinks)
+        2. ModePolicy (only for metadata mode, which short-circuits)
+        3. ErrorPolicy (handles classification errors)
+        4. BinaryPolicy (for binary files)
+        5. TextPolicy (for text files)
+        """
+        policies: List[FilePolicy] = []
+
+        # Special case: metadata mode – only ModePolicy applies
+        if config.mode == Mode.metadata:
+            policies.append(ModePolicy(config.mode))
+            return policies
+
+        # For full mode, build the full chain
+        # 1. Symlink handling (if not following)
+        if config.scan.symlinks_files != SymlinkFilesMode.follow:
+            policies.append(SymlinkPolicy(config.scan.symlinks_files))
+
+        # 2. Error policy
+        policies.append(ErrorPolicy())
+
+        # 3. Binary policy
+        policies.append(BinaryPolicy(config.binary, ingestor))
+
+        # 4. Text policy
+        policies.append(TextPolicy(config.text, ingestor))
+
+        return policies
 
     @staticmethod
     def _null_reporter() -> ProgressReporter:
