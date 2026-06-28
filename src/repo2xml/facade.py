@@ -5,6 +5,7 @@ import io
 import logging
 import os
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, List, Optional, Union
 
@@ -27,6 +28,13 @@ from repo2xml.services.serialize.factory import get_format_factory
 from repo2xml.services.tokenize import create_token_counter
 
 logger = logging.getLogger("repo2xml.facade")
+
+
+@dataclass(slots=True)
+class ExportComponents:
+    """Container for components built during export pipeline setup."""
+    orchestrator: PipelineOrchestrator
+    collector: StatisticsCollector
 
 
 class StreamTarget(OutputTarget):
@@ -78,13 +86,12 @@ class RepoXML:
         # 2. Build all components
         # ------------------------------------------------------------------
         components = self._build_export_components(config, root, output_stream, progress)
-        orchestrator = components["orchestrator"]
 
         # ------------------------------------------------------------------
         # 3. Run the pipeline
         # ------------------------------------------------------------------
         try:
-            stats = orchestrator.execute(stats_only=stats_only)
+            stats = components.orchestrator.execute(stats_only=stats_only)
         except KeyboardInterrupt:
             raise
         except Exception as e:
@@ -121,13 +128,12 @@ class RepoXML:
         root: Path,
         output_stream: BinaryIO,
         progress: Optional[ProgressReporter],
-    ) -> dict:
+    ) -> ExportComponents:
         """
         Create and wire all components for the export pipeline.
 
-        Returns a dict containing:
-            - orchestrator: PipelineOrchestrator instance
-            - collector: StatisticsCollector instance
+        Returns:
+            ExportComponents containing orchestrator and statistics collector.
         """
         # --- Progress reporter ---
         if progress is None:
@@ -238,10 +244,7 @@ class RepoXML:
             root_path=root,
         )
 
-        return {
-            "orchestrator": orchestrator,
-            "collector": collector,
-        }
+        return ExportComponents(orchestrator=orchestrator, collector=collector)
 
     # ------------------------------------------------------------------
     # Other public methods
@@ -272,7 +275,7 @@ class RepoXML:
         )
 
         entries = list(scanner.scan())
-        entries = apply_file_filters(entries, config)   # <--- FIXED: pass full config
+        entries = apply_file_filters(entries, config)
         entries.sort(key=lambda e: e.rel_path)
         return entries
 
