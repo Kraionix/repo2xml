@@ -20,7 +20,8 @@ from .serialize import (
 from .tokenize import TokenCounter, TokenCounterFactory
 from .progress import ProgressReporter
 from .stats import StatsProvider
-from .policies import FilePolicy
+
+# FilePolicy has been removed in favour of the pipeline architecture.
 
 __all__ = [
     "ScannerLike",
@@ -37,5 +38,4 @@ __all__ = [
     "TokenCounterFactory",
     "ProgressReporter",
     "StatsProvider",
-    "FilePolicy",
 ]
