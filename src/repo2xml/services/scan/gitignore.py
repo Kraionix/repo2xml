@@ -6,14 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
-# We rely on pathspec's gitwildmatch matcher (existing dependency).
-# Using compiled pattern objects directly allows correct per-directory scoping
-# without lossy "prefix rewriting".
-try:
-    from pathspec.patterns.gitwildmatch import GitWildMatchPattern as _GitWildMatchPattern
-except Exception:  # pragma: no cover
-    # Fallback for older pathspec layouts (best-effort).
-    from pathspec.patterns import GitWildMatchPattern as _GitWildMatchPattern  # type: ignore
+# Using modern GitIgnoreSpecPattern from pathspec >= 1.0
+from pathspec.patterns.gitignore.spec import GitIgnoreSpecPattern
 
 logger = logging.getLogger("repo2xml.gitignore")
 
@@ -46,11 +40,11 @@ class IgnoreRuleset:
     base_prefix:
       - base_dir_rel + "/" ("" for root), used for fast subpath derivation
     patterns:
-      - compiled gitwildmatch patterns in original file order
+      - compiled gitignore patterns in original file order
     """
     base_dir_rel: str
     base_prefix: str
-    patterns: Tuple[_GitWildMatchPattern, ...]
+    patterns: Tuple[GitIgnoreSpecPattern, ...]
 
 
 def _rstrip_unescaped_trailing_ws(s: str) -> str:
@@ -96,7 +90,7 @@ def _normalize_gitignore_line(raw: str) -> Optional[str]:
 
     Important:
     - We intentionally do NOT strip leading whitespace. Leading spaces can be significant.
-    - We do NOT unescape leading '\\!' or '\\#' here; the gitwildmatch matcher supports
+    - We do NOT unescape leading '\\!' or '\\#' here; the matcher supports
       Git-style escaping. Unescaping '\\!' would be incorrect (it would turn a literal
       '!' into a negation marker).
     """
@@ -135,19 +129,17 @@ def _read_gitignore_file_lines(p: Path) -> List[str]:
         return []
 
 
-def _compile_patterns(lines: Sequence[str], *, source: str = "<unknown>") -> Tuple[_GitWildMatchPattern, ...]:
+def _compile_patterns(lines: Sequence[str], *, source: str = "<unknown>") -> Tuple[GitIgnoreSpecPattern, ...]:
     """
-    Compile normalized gitignore lines into gitwildmatch pattern objects.
-
-    We keep compilation isolated to allow caching and to avoid repeated parsing.
+    Compile normalized gitignore lines into gitignore pattern objects.
     """
-    pats: List[_GitWildMatchPattern] = []
+    pats: List[GitIgnoreSpecPattern] = []
     for line in lines:
         norm = _normalize_gitignore_line(line)
         if not norm:
             continue
         try:
-            pats.append(_GitWildMatchPattern(norm))
+            pats.append(GitIgnoreSpecPattern(norm))
         except Exception:
             # Best-effort: skip patterns that the matcher cannot compile.
             # Git itself ignores some malformed patterns, but we log a warning.
@@ -166,7 +158,7 @@ class GitignoreEngine:
     - "Last matching pattern wins" across all applicable .gitignore files.
 
     Implementation notes:
-    - We use pathspec's gitwildmatch matcher (pattern objects) for correctness.
+    - We use pathspec's GitIgnoreSpecPattern for correctness.
     - We do NOT consider Git index / tracked paths (not required).
     - We do NOT read any ignore files inside ".git" (scanner hard-excludes ".git").
     """
@@ -198,7 +190,7 @@ class GitignoreEngine:
         )
 
         # Cache compiled pattern tuples for .gitignore files (keyed by absolute path).
-        self._compiled_cache: dict[Path, Tuple[_GitWildMatchPattern, ...]] = {}
+        self._compiled_cache: dict[Path, Tuple[GitIgnoreSpecPattern, ...]] = {}
 
     def base_ruleset(self) -> IgnoreRuleset:
         """Return the root-scoped base ruleset (ALWAYS_IGNORE + user overrides)."""
@@ -272,9 +264,9 @@ class GitignoreEngine:
                 for cand in candidates:
                     try:
                         if pat.match_file(cand):
-                            # In pathspec gitwildmatch:
-                            # - non-negated patterns typically have include=True (ignored)
-                            # - negated patterns typically have include=False (not ignored)
+                            # In pathspec, patterns have an 'include' attribute.
+                            # Non-negated patterns typically have include=True (ignored)
+                            # Negated patterns typically have include=False (not ignored)
                             return bool(getattr(pat, "include", True))
                     except Exception:
                         # Best-effort: ignore matcher failures for this pattern.
