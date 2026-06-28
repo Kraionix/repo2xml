@@ -6,7 +6,19 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from repo2xml.config import ExportConfig, RestoreConfig, Mode
+from repo2xml.config import (
+    ExportConfig,
+    RestoreConfig,
+    Mode,
+    BinaryHandlingConfig,
+    TextHandlingConfig,
+    ScanConfig,
+    FilterConfig,
+    OutputFormatConfig,
+    RedactConfig,
+    ClassifyConfig,
+    TokenCountConfig,
+)
 from repo2xml.domain.exceptions import ConfigurationError, FacadeError
 from repo2xml.facade import RepoXML
 
@@ -17,10 +29,14 @@ class TestRepoXMLFacade:
         return ExportConfig(
             format="xml",
             mode=Mode.full,
-            binary="skip",
-            max_text_size=1000,
-            count_tokens=False,
-            redact=False,
+            binary=BinaryHandlingConfig(mode="skip"),
+            text=TextHandlingConfig(max_text_size=1000),
+            token=TokenCountConfig(enabled=False),
+            redact=RedactConfig(enabled=False),
+            scan=ScanConfig(),
+            filter=FilterConfig(),
+            output=OutputFormatConfig(),
+            classify=ClassifyConfig(),
         )
 
     @pytest.fixture
@@ -115,7 +131,7 @@ class TestRepoXMLFacade:
             mock_restore.assert_called_once()
 
     def test_export_with_count_tokens_missing_dependency(self, export_config) -> None:
-        export_config.count_tokens = True
+        export_config.token.enabled = True
         facade = RepoXML(export_config)
         with patch("builtins.__import__", side_effect=ImportError("no transformers")):
             with pytest.raises(ConfigurationError, match="Token counting requires"):
@@ -123,15 +139,15 @@ class TestRepoXMLFacade:
 
     def test_export_with_classify_config_not_exists(self, export_config) -> None:
         """The facade does not catch FileNotFoundError from config loading, so we expect it."""
-        export_config.classify_config_path = Path("/nonexistent.yml")
+        export_config.classify.config_path = Path("/nonexistent.yml")
         facade = RepoXML(export_config)
         with pytest.raises(FileNotFoundError):
             facade.export(Path("."), MagicMock())
 
     def test_export_with_invalid_config(self, export_config) -> None:
         """Invalid min/max sizes do not raise an exception because validate() is not called."""
-        export_config.min_file_size = 100
-        export_config.max_file_size = 50
+        export_config.filter.min_file_size = 100
+        export_config.filter.max_file_size = 50
         facade = RepoXML(export_config)
         # No exception should be raised; the pipeline will apply filters but they won't cause an error.
         # We just check that export runs (it will fail because we mock nothing, but at least no ConfigError).

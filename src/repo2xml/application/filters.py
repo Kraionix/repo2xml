@@ -14,18 +14,19 @@ def apply_file_filters(entries: List[FileEntry], config: ExportConfig) -> List[F
     This is a pure function, intentionally extracted to be reused between
     the pipeline and the dry‑run facade method.
     """
+    cfg = config.filter
     if (
-        config.min_file_size > 0
-        or config.max_file_size > 0
-        or config.newer_than is not None
-        or config.older_than is not None
+        cfg.min_file_size > 0
+        or cfg.max_file_size > 0
+        or cfg.newer_than is not None
+        or cfg.older_than is not None
     ):
         return [
             e
             for e in entries
-            if (config.min_file_size == 0 or e.size >= config.min_file_size)
-            and (config.max_file_size == 0 or e.size <= config.max_file_size)
-            and (config.newer_than is None or (e.mtime_ns / 1e9) >= config.newer_than)
-            and (config.older_than is None or (e.mtime_ns / 1e9) <= config.older_than)
+            if (cfg.min_file_size == 0 or e.size >= cfg.min_file_size)
+            and (cfg.max_file_size == 0 or e.size <= cfg.max_file_size)
+            and (cfg.newer_than is None or (e.mtime_ns / 1e9) >= cfg.newer_than)
+            and (cfg.older_than is None or (e.mtime_ns / 1e9) <= cfg.older_than)
         ]
     return entries

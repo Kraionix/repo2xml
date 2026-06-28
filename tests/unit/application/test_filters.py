@@ -7,7 +7,7 @@ from typing import List
 import pytest
 
 from repo2xml.application.filters import apply_file_filters
-from repo2xml.config import ExportConfig
+from repo2xml.config import ExportConfig, FilterConfig
 from repo2xml.domain.model import FileEntry
 
 
@@ -54,32 +54,32 @@ def sample_entries() -> List[FileEntry]:
 
 class TestApplyFileFilters:
     def test_no_filters(self, sample_entries: List[FileEntry]) -> None:
-        config = ExportConfig()
+        config = ExportConfig()  # default filter config has no limits
         filtered = apply_file_filters(sample_entries, config)
         assert len(filtered) == 3
         assert filtered == sample_entries
 
     def test_min_file_size(self, sample_entries: List[FileEntry]) -> None:
-        config = ExportConfig(min_file_size=150)
+        config = ExportConfig(filter=FilterConfig(min_file_size=150))
         filtered = apply_file_filters(sample_entries, config)
         assert len(filtered) == 2
         assert all(e.size >= 150 for e in filtered)
 
     def test_max_file_size(self, sample_entries: List[FileEntry]) -> None:
-        config = ExportConfig(max_file_size=250)
+        config = ExportConfig(filter=FilterConfig(max_file_size=250))
         filtered = apply_file_filters(sample_entries, config)
         assert len(filtered) == 2
         assert all(e.size <= 250 for e in filtered)
 
     def test_min_and_max_file_size(self, sample_entries: List[FileEntry]) -> None:
-        config = ExportConfig(min_file_size=150, max_file_size=250)
+        config = ExportConfig(filter=FilterConfig(min_file_size=150, max_file_size=250))
         filtered = apply_file_filters(sample_entries, config)
         assert len(filtered) == 1
         assert filtered[0].size == 200
 
     def test_newer_than(self, sample_entries: List[FileEntry]) -> None:
         # newer_than = 2.5 seconds (mtime_ns / 1e9 > 2.5)
-        config = ExportConfig(newer_than=2.5)
+        config = ExportConfig(filter=FilterConfig(newer_than=2.5))
         filtered = apply_file_filters(sample_entries, config)
         # only file3 has mtime 3.0 > 2.5
         assert len(filtered) == 1
@@ -87,7 +87,7 @@ class TestApplyFileFilters:
 
     def test_older_than(self, sample_entries: List[FileEntry]) -> None:
         # older_than = 2.5 seconds (mtime_ns / 1e9 < 2.5)
-        config = ExportConfig(older_than=2.5)
+        config = ExportConfig(filter=FilterConfig(older_than=2.5))
         filtered = apply_file_filters(sample_entries, config)
         # file1 and file2 qualify
         assert len(filtered) == 2
@@ -95,10 +95,12 @@ class TestApplyFileFilters:
 
     def test_combine_filters(self, sample_entries: List[FileEntry]) -> None:
         config = ExportConfig(
-            min_file_size=150,
-            max_file_size=250,
-            newer_than=1.5,
-            older_than=2.5,
+            filter=FilterConfig(
+                min_file_size=150,
+                max_file_size=250,
+                newer_than=1.5,
+                older_than=2.5,
+            )
         )
         filtered = apply_file_filters(sample_entries, config)
         # file2: size 200, mtime 2.0 -> inside both time ranges
@@ -112,6 +114,6 @@ class TestApplyFileFilters:
 
     def test_ignore_zero_filters(self, sample_entries: List[FileEntry]) -> None:
         # when min=0, max=0, no time filters, all pass
-        config = ExportConfig(min_file_size=0, max_file_size=0)
+        config = ExportConfig(filter=FilterConfig(min_file_size=0, max_file_size=0))
         filtered = apply_file_filters(sample_entries, config)
         assert len(filtered) == 3

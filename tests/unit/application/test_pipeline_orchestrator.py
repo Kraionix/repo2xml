@@ -10,14 +10,29 @@ from repo2xml.application.entry_processor import EntryProcessor
 from repo2xml.application.pipeline_orchestrator import PipelineOrchestrator
 from repo2xml.application.statistics_collector import StatisticsCollector
 from repo2xml.application.writer_coordinator import WriterCoordinator
-from repo2xml.config import ExportConfig, Mode
+from repo2xml.config import (
+    ExportConfig,
+    Mode,
+    OutputFormatConfig,
+    ScanConfig,
+    FilterConfig,
+    BinaryHandlingConfig,
+    TextHandlingConfig,
+)
 from repo2xml.domain.model import FileEntry, TextPayload
 
 
 class TestPipelineOrchestrator:
     @pytest.fixture
     def config(self) -> ExportConfig:
-        return ExportConfig(mode=Mode.full, formatting="compact", include_mtime=True, include_size=True)
+        return ExportConfig(
+            mode=Mode.full,
+            output=OutputFormatConfig(formatting="compact", include_mtime=True, include_size=True),
+            scan=ScanConfig(),
+            filter=FilterConfig(),
+            binary=BinaryHandlingConfig(),
+            text=TextHandlingConfig(),
+        )
 
     @pytest.fixture
     def mock_scanner(self) -> MagicMock:

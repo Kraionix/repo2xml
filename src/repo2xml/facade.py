@@ -272,7 +272,7 @@ class RepoXML:
         )
 
         entries = list(scanner.scan())
-        entries = apply_file_filters(entries, config.filter)
+        entries = apply_file_filters(entries, config)   # <--- FIXED: pass full config
         entries.sort(key=lambda e: e.rel_path)
         return entries
 

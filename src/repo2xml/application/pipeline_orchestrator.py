@@ -69,7 +69,7 @@ class PipelineOrchestrator:
             self.progress.advance(1)
 
         original_count = len(entries)
-        entries = apply_file_filters(entries, self.config.filter)
+        entries = apply_file_filters(entries, self.config)   # <--- FIXED: pass full config
         if len(entries) != original_count:
             logger.info(
                 "File-level filters removed %d entries (%d remaining).",

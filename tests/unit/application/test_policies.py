@@ -13,7 +13,13 @@ from repo2xml.application.policies import (
     SymlinkPolicy,
     TextPolicy,
 )
-from repo2xml.config import BinaryMode, ExportConfig, Mode, SymlinkFilesMode
+from repo2xml.config import (
+    BinaryHandlingConfig,
+    BinaryMode,
+    Mode,
+    SymlinkFilesMode,
+    TextHandlingConfig,
+)
 from repo2xml.domain.model import (
     BinaryBase64Payload,
     BinaryHashPayload,
@@ -43,22 +49,19 @@ class TestSymlinkPolicy:
         )
 
     def test_as_link(self, symlink_entry) -> None:
-        config = ExportConfig(symlinks_files=SymlinkFilesMode.as_link)
-        policy = SymlinkPolicy(config)
+        policy = SymlinkPolicy(symlinks_files=SymlinkFilesMode.as_link)
         payload = policy.apply(symlink_entry)
         assert isinstance(payload, LinkPayload)
         assert payload.link_target == "/target"
 
     def test_skip(self, symlink_entry) -> None:
-        config = ExportConfig(symlinks_files=SymlinkFilesMode.skip)
-        policy = SymlinkPolicy(config)
+        policy = SymlinkPolicy(symlinks_files=SymlinkFilesMode.skip)
         payload = policy.apply(symlink_entry)
         assert isinstance(payload, SkippedPayload)
         assert payload.code == SkipCode.unknown
 
     def test_follow_returns_none(self, symlink_entry) -> None:
-        config = ExportConfig(symlinks_files=SymlinkFilesMode.follow)
-        policy = SymlinkPolicy(config)
+        policy = SymlinkPolicy(symlinks_files=SymlinkFilesMode.follow)
         payload = policy.apply(symlink_entry)
         assert payload is None
 
@@ -71,23 +74,20 @@ class TestSymlinkPolicy:
             mtime_ns=0,
             is_symlink=False,
         )
-        config = ExportConfig(symlinks_files=SymlinkFilesMode.as_link)
-        policy = SymlinkPolicy(config)
+        policy = SymlinkPolicy(symlinks_files=SymlinkFilesMode.as_link)
         payload = policy.apply(entry)
         assert payload is None
 
 
 class TestModePolicy:
     def test_metadata_mode(self) -> None:
-        config = ExportConfig(mode=Mode.metadata)
-        policy = ModePolicy(config)
+        policy = ModePolicy(mode=Mode.metadata)
         entry = FileEntry(abs_path=Path("/a"), rel_path="a", name="a", size=0, mtime_ns=0, is_symlink=False)
         payload = policy.apply(entry)
         assert isinstance(payload, MetadataPayload)
 
     def test_full_mode_returns_none(self) -> None:
-        config = ExportConfig(mode=Mode.full)
-        policy = ModePolicy(config)
+        policy = ModePolicy(mode=Mode.full)
         entry = FileEntry(abs_path=Path("/a"), rel_path="a", name="a", size=0, mtime_ns=0, is_symlink=False)
         payload = policy.apply(entry)
         assert payload is None
@@ -113,54 +113,54 @@ class TestBinaryPolicy:
         return ing
 
     def test_skip(self, binary_entry, ingestor) -> None:
-        config = ExportConfig(binary=BinaryMode.skip)
-        policy = BinaryPolicy(config, ingestor)
+        binary_cfg = BinaryHandlingConfig(mode=BinaryMode.skip)
+        policy = BinaryPolicy(binary_cfg, ingestor)
         payload = policy.apply(binary_entry)
         assert isinstance(payload, SkippedPayload)
         assert payload.code == SkipCode.binary_skip_mode
 
     def test_hash(self, binary_entry, ingestor) -> None:
-        config = ExportConfig(binary=BinaryMode.hash)
-        policy = BinaryPolicy(config, ingestor)
+        binary_cfg = BinaryHandlingConfig(mode=BinaryMode.hash)
+        policy = BinaryPolicy(binary_cfg, ingestor)
         payload = policy.apply(binary_entry)
         assert isinstance(payload, BinaryHashPayload)
         assert payload.sha256_hex == "abc123"
         ingestor.sha256_file.assert_called_once_with(binary_entry.abs_path)
 
     def test_hash_size_limit(self, binary_entry, ingestor) -> None:
-        config = ExportConfig(binary=BinaryMode.hash, max_hash_size=50)
-        policy = BinaryPolicy(config, ingestor)
+        binary_cfg = BinaryHandlingConfig(mode=BinaryMode.hash, max_hash_size=50)
+        policy = BinaryPolicy(binary_cfg, ingestor)
         payload = policy.apply(binary_entry)
         assert isinstance(payload, SkippedPayload)
         assert payload.code == SkipCode.hash_size_limit
 
     def test_hash_error(self, binary_entry, ingestor) -> None:
         ingestor.sha256_file.side_effect = OSError("Permission denied")
-        config = ExportConfig(binary=BinaryMode.hash)
-        policy = BinaryPolicy(config, ingestor)
+        binary_cfg = BinaryHandlingConfig(mode=BinaryMode.hash)
+        policy = BinaryPolicy(binary_cfg, ingestor)
         payload = policy.apply(binary_entry)
         assert isinstance(payload, ErrorPayload)
         assert payload.code == ErrorCode.binary_hash_error
 
     def test_base64(self, binary_entry, ingestor) -> None:
-        config = ExportConfig(binary=BinaryMode.base64)
-        policy = BinaryPolicy(config, ingestor)
+        binary_cfg = BinaryHandlingConfig(mode=BinaryMode.base64)
+        policy = BinaryPolicy(binary_cfg, ingestor)
         payload = policy.apply(binary_entry)
         assert isinstance(payload, BinaryBase64Payload)
         assert list(payload.chunks) == ["YQ==", "Ig=="]
         ingestor.iter_base64_chunks.assert_called_once_with(binary_entry.abs_path)
 
     def test_base64_size_limit(self, binary_entry, ingestor) -> None:
-        config = ExportConfig(binary=BinaryMode.base64, max_base64_size=50)
-        policy = BinaryPolicy(config, ingestor)
+        binary_cfg = BinaryHandlingConfig(mode=BinaryMode.base64, max_base64_size=50)
+        policy = BinaryPolicy(binary_cfg, ingestor)
         payload = policy.apply(binary_entry)
         assert isinstance(payload, SkippedPayload)
         assert payload.code == SkipCode.base64_size_limit
 
     def test_base64_error(self, binary_entry, ingestor) -> None:
         ingestor.iter_base64_chunks.side_effect = OSError("IO error")
-        config = ExportConfig(binary=BinaryMode.base64)
-        policy = BinaryPolicy(config, ingestor)
+        binary_cfg = BinaryHandlingConfig(mode=BinaryMode.base64)
+        policy = BinaryPolicy(binary_cfg, ingestor)
         payload = policy.apply(binary_entry)
         assert isinstance(payload, ErrorPayload)
         assert payload.code == ErrorCode.base64_error
@@ -193,8 +193,8 @@ class TestTextPolicy:
         return ClassificationResult(kind="text", encoding="utf-8", sample=b"hello")
 
     def test_success(self, text_entry, ingestor, classification) -> None:
-        config = ExportConfig(max_text_size=1000)
-        policy = TextPolicy(config, ingestor)
+        text_cfg = TextHandlingConfig(max_text_size=1000)
+        policy = TextPolicy(text_cfg, ingestor)
         payload = policy.apply(text_entry, classification)
         assert isinstance(payload, TextPayload)
         assert payload.text == "hello world"
@@ -206,8 +206,8 @@ class TestTextPolicy:
         )
 
     def test_size_limit(self, text_entry, ingestor, classification) -> None:
-        config = ExportConfig(max_text_size=10)
-        policy = TextPolicy(config, ingestor)
+        text_cfg = TextHandlingConfig(max_text_size=10)
+        policy = TextPolicy(text_cfg, ingestor)
         payload = policy.apply(text_entry, classification)
         assert isinstance(payload, SkippedPayload)
         assert payload.code == SkipCode.text_size_limit
@@ -217,8 +217,8 @@ class TestTextPolicy:
             kind="error",
             error=MagicMock(code=ErrorCode.text_read_error, detail={})
         )
-        config = ExportConfig(max_text_size=1000)
-        policy = TextPolicy(config, ingestor)
+        text_cfg = TextHandlingConfig(max_text_size=1000)
+        policy = TextPolicy(text_cfg, ingestor)
         payload = policy.apply(text_entry, classification)
         assert isinstance(payload, ErrorPayload)
         assert payload.code == ErrorCode.text_read_error
@@ -228,8 +228,8 @@ class TestTextPolicy:
             kind="skip",
             skipped=MagicMock(code=SkipCode.text_size_limit, detail={})
         )
-        config = ExportConfig(max_text_size=1000)
-        policy = TextPolicy(config, ingestor)
+        text_cfg = TextHandlingConfig(max_text_size=1000)
+        policy = TextPolicy(text_cfg, ingestor)
         payload = policy.apply(text_entry, classification)
         assert isinstance(payload, SkippedPayload)
         assert payload.code == SkipCode.text_size_limit
@@ -254,24 +254,39 @@ class TestExportPayloadBuilder:
         return ing
 
     def test_build_text(self, entry, ingestor) -> None:
-        config = ExportConfig(mode=Mode.full, binary=BinaryMode.skip, max_text_size=1000)
-        builder = ExportPayloadBuilder(config, ingestor)
+        builder = ExportPayloadBuilder(
+            mode=Mode.full,
+            binary=BinaryHandlingConfig(mode=BinaryMode.skip),
+            text=TextHandlingConfig(max_text_size=1000),
+            symlinks_files=SymlinkFilesMode.follow,
+            ingestor=ingestor,
+        )
         classification = ClassificationResult(kind="text", encoding="utf-8")
         payload = builder.build(entry, classification)
         assert isinstance(payload, TextPayload)
         assert payload.text == "content"
 
     def test_build_binary_skip(self, entry, ingestor) -> None:
-        config = ExportConfig(mode=Mode.full, binary=BinaryMode.skip)
-        builder = ExportPayloadBuilder(config, ingestor)
+        builder = ExportPayloadBuilder(
+            mode=Mode.full,
+            binary=BinaryHandlingConfig(mode=BinaryMode.skip),
+            text=TextHandlingConfig(),
+            symlinks_files=SymlinkFilesMode.follow,
+            ingestor=ingestor,
+        )
         classification = ClassificationResult(kind="binary")
         payload = builder.build(entry, classification)
         assert isinstance(payload, SkippedPayload)
         assert payload.code == SkipCode.binary_skip_mode
 
     def test_build_metadata_mode(self, entry, ingestor) -> None:
-        config = ExportConfig(mode=Mode.metadata)
-        builder = ExportPayloadBuilder(config, ingestor)
+        builder = ExportPayloadBuilder(
+            mode=Mode.metadata,
+            binary=BinaryHandlingConfig(),
+            text=TextHandlingConfig(),
+            symlinks_files=SymlinkFilesMode.follow,
+            ingestor=ingestor,
+        )
         classification = ClassificationResult(kind="text")
         payload = builder.build(entry, classification)
         assert isinstance(payload, MetadataPayload)
@@ -286,23 +301,38 @@ class TestExportPayloadBuilder:
             is_symlink=True,
             symlink_target="/target",
         )
-        config = ExportConfig(symlinks_files=SymlinkFilesMode.as_link)
-        builder = ExportPayloadBuilder(config, ingestor)
+        builder = ExportPayloadBuilder(
+            mode=Mode.full,
+            binary=BinaryHandlingConfig(),
+            text=TextHandlingConfig(),
+            symlinks_files=SymlinkFilesMode.as_link,
+            ingestor=ingestor,
+        )
         classification = ClassificationResult(kind="text")
         payload = builder.build(sym_entry, classification)
         assert isinstance(payload, LinkPayload)
 
     def test_build_classification_error(self, entry, ingestor) -> None:
-        config = ExportConfig()
-        builder = ExportPayloadBuilder(config, ingestor)
+        builder = ExportPayloadBuilder(
+            mode=Mode.full,
+            binary=BinaryHandlingConfig(),
+            text=TextHandlingConfig(),
+            symlinks_files=SymlinkFilesMode.follow,
+            ingestor=ingestor,
+        )
         classification = ClassificationResult(kind="error", error="read failed")
         payload = builder.build(entry, classification)
         assert isinstance(payload, ErrorPayload)
         assert payload.code == ErrorCode.sniff_read_error
 
     def test_build_binary_hash(self, entry, ingestor) -> None:
-        config = ExportConfig(binary=BinaryMode.hash)
-        builder = ExportPayloadBuilder(config, ingestor)
+        builder = ExportPayloadBuilder(
+            mode=Mode.full,
+            binary=BinaryHandlingConfig(mode=BinaryMode.hash),
+            text=TextHandlingConfig(),
+            symlinks_files=SymlinkFilesMode.follow,
+            ingestor=ingestor,
+        )
         classification = ClassificationResult(kind="binary")
         payload = builder.build(entry, classification)
         assert isinstance(payload, BinaryHashPayload)

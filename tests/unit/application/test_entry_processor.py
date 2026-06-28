@@ -8,7 +8,16 @@ import pytest
 
 from repo2xml.application.entry_processor import EntryProcessor
 from repo2xml.application.policies import ExportPayloadBuilder
-from repo2xml.config import ExportConfig
+from repo2xml.config import (
+    BinaryHandlingConfig,
+    BinaryMode,
+    ExportConfig,
+    Mode,
+    RedactConfig,
+    ScanConfig,
+    TextHandlingConfig,
+    TokenCountConfig,
+)
 from repo2xml.domain.model import (
     ClassificationResult,
     ErrorCode,
@@ -24,11 +33,12 @@ class TestEntryProcessor:
     @pytest.fixture
     def config(self) -> ExportConfig:
         return ExportConfig(
-            mode="full",
-            binary="skip",
-            max_text_size=1000,
-            count_tokens=False,
-            redact=False,
+            mode=Mode.full,
+            binary=BinaryHandlingConfig(mode=BinaryMode.skip),
+            text=TextHandlingConfig(max_text_size=1000),
+            token=TokenCountConfig(enabled=False),
+            redact=RedactConfig(enabled=False),
+            scan=ScanConfig(),
         )
 
     @pytest.fixture
@@ -82,7 +92,7 @@ class TestEntryProcessor:
         assert result.token_count is None
 
     def test_process_with_token_counting(self, config, mock_classifier, mock_ingestor, mock_token_counter, entry) -> None:
-        config.count_tokens = True
+        config.token.enabled = True
         processor = EntryProcessor(
             config=config,
             ingestor=mock_ingestor,
@@ -96,7 +106,7 @@ class TestEntryProcessor:
         mock_token_counter.count.assert_called_once_with("content", ext=".txt")
 
     def test_process_with_redaction(self, config, mock_classifier, mock_ingestor, mock_redact, entry) -> None:
-        config.redact = True
+        config.redact.enabled = True
         processor = EntryProcessor(
             config=config,
             ingestor=mock_ingestor,
@@ -172,7 +182,7 @@ class TestEntryProcessor:
         assert result.error_code == ErrorCode.text_read_error.value
 
     def test_process_tokenization_error(self, config, mock_classifier, mock_ingestor, mock_token_counter, entry) -> None:
-        config.count_tokens = True
+        config.token.enabled = True
         mock_token_counter.count.side_effect = Exception("Tokenizer failed")
         processor = EntryProcessor(
             config=config,
