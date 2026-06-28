@@ -139,6 +139,7 @@ class XMLDeserializer(Deserializer):
                 dt = dt.replace(tzinfo=timezone.utc)
             return int(dt.timestamp() * 1_000_000_000)
         except Exception:
+            logger.warning("Failed to parse mtime string: %r, returning 0", iso_string)
             return 0
 
     def _parse_files(self, root: ET.Element) -> Iterator[RestoreEntry]:

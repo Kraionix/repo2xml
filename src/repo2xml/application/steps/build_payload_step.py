@@ -6,6 +6,7 @@ from typing import List
 from repo2xml.contracts import FilePolicy
 from repo2xml.application.processing_context import ProcessingContext
 from repo2xml.application.step import Step
+from repo2xml.config import Mode
 from repo2xml.domain.model import ErrorPayload, ErrorCode, SkippedPayload
 
 
@@ -18,18 +19,22 @@ class BuildPayloadStep(Step):
     matches, an ErrorPayload is returned as a fallback.
     """
 
-    def __init__(self, policies: List[FilePolicy]) -> None:
+    def __init__(self, policies: List[FilePolicy], mode: Mode) -> None:
         """
         Args:
             policies: Ordered list of FilePolicy instances to apply.
+            mode: Export mode (used to decide whether classification is required).
         """
         self._policies = policies
+        self._mode = mode
 
     def process(self, ctx: ProcessingContext) -> None:
         entry = ctx.entry
         classification = ctx.classification
-        if classification is None:
-            # Should not happen if ClassifyStep ran first
+
+        # In metadata mode, classification is deliberately skipped, so None is expected.
+        if classification is None and self._mode != Mode.metadata:
+            # Should not happen if ClassifyStep ran first (except metadata mode)
             ctx.should_stop = True
             ctx.is_success = False
             ctx.error_code = "missing_classification"
@@ -49,7 +54,7 @@ class BuildPayloadStep(Step):
             payload = ErrorPayload(
                 code=ErrorCode.unknown,
                 message="No policy matched for this file",
-                detail={"entry": entry.rel_path, "kind": classification.kind},
+                detail={"entry": entry.rel_path, "kind": classification.kind if classification else "unknown"},
             )
 
         ctx.payload = payload

@@ -10,7 +10,7 @@ from repo2xml.application.steps.classify_step import ClassifyStep
 from repo2xml.application.steps.build_payload_step import BuildPayloadStep
 from repo2xml.application.steps.redact_step import RedactStep
 from repo2xml.application.steps.token_count_step import TokenCountStep
-from repo2xml.config import ExportConfig
+from repo2xml.config import ExportConfig, Mode
 
 
 class StepFactory:
@@ -31,11 +31,12 @@ class StepFactory:
     def create_steps(self) -> List[Step]:
         steps: List[Step] = []
 
-        # 1. Classification
-        steps.append(ClassifyStep(self._services.classification_engine))
+        # 1. Classification (skip in metadata mode – no content analysis needed)
+        if self._config.mode != Mode.metadata:
+            steps.append(ClassifyStep(self._services.classification_engine))
 
         # 2. Build payload (using the policy chain)
-        steps.append(BuildPayloadStep(self._policies))
+        steps.append(BuildPayloadStep(self._policies, mode=self._config.mode))
 
         # 3. Redaction (if enabled)
         if self._config.redact.enabled and self._services.redaction_engine is not None:

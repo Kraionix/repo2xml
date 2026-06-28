@@ -1,6 +1,7 @@
 # src/repo2xml/cli/options.py
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
@@ -26,6 +27,8 @@ from repo2xml.config import (
 from repo2xml.domain.exceptions import ConfigurationError
 from repo2xml.services.output.targets import CompressMode
 from repo2xml.utils.paths import try_relpath_posix
+
+logger = logging.getLogger("repo2xml.cli.options")
 
 
 @dataclass(slots=True)
@@ -204,7 +207,8 @@ class ExportOptions:
                     "--validate-xml is only supported with file output."
                 )
             if self.compress != CompressMode.none:
-                raise ConfigurationError(
-                    "--validate-xml cannot be used with --compress. "
-                    "Either disable compression or omit --validate-xml."
+                logger.warning(
+                    "Validation is disabled because compression is enabled. "
+                    "Skipping XML validation."
                 )
+                self.validate_xml = False

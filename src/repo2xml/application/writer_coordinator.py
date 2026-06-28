@@ -68,9 +68,11 @@ class WriterCoordinator:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        has_exception = exc_type is not None
+
         # If an exception occurred and the files section is still open,
         # close it and write the footer to produce a valid XML document.
-        if exc_type is not None and self._files_section_open:
+        if has_exception and self._files_section_open:
             try:
                 self.write_files_close()
                 self.write_footer()
@@ -85,7 +87,11 @@ class WriterCoordinator:
             if self._text_wrapper is not None:
                 self._text_wrapper.flush()
         except Exception as e:
-            logger.error("Error during final flush: %s", e)
+            if has_exception:
+                logger.error("Error during final flush (suppressed): %s", e)
+            else:
+                logger.error("Error during final flush: %s", e)
+                raise RuntimeError("Failed to flush output") from e
 
         # Detach the TextIOWrapper from the underlying stream without closing it.
         # This allows the underlying stream (e.g., BytesIO for clipboard) to remain
@@ -94,7 +100,11 @@ class WriterCoordinator:
             try:
                 self._text_wrapper.detach()
             except Exception as e:
-                logger.error("Error detaching TextIOWrapper: %s", e)
+                if has_exception:
+                    logger.error("Error detaching TextIOWrapper (suppressed): %s", e)
+                else:
+                    logger.error("Error detaching TextIOWrapper: %s", e)
+                    raise RuntimeError("Failed to detach TextIOWrapper") from e
 
         # Exit the output target context (this will close the stream and,
         # for ClipboardTarget, copy the data to the clipboard).
@@ -102,7 +112,11 @@ class WriterCoordinator:
             try:
                 self._cm.__exit__(exc_type, exc_val, exc_tb)
             except Exception as e:
-                logger.error("Error while exiting output target context: %s", e)
+                if has_exception:
+                    logger.error("Error while exiting output target context (suppressed): %s", e)
+                else:
+                    logger.error("Error while exiting output target context: %s", e)
+                    raise RuntimeError("Failed to close output target") from e
 
         self._stream = None
         self._text_wrapper = None
