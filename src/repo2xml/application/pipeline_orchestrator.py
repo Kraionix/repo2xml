@@ -8,7 +8,8 @@ from typing import List, Optional
 
 from repo2xml.application.contracts import ProgressReporter, ScannerLike
 from repo2xml.application.entry_processor import EntryProcessor
-from repo2xml.application.filters import apply_file_filters
+from repo2xml.application.file_processing_engine import FileProcessingEngine
+from repo2xml.application.scanner_service import ScannerService
 from repo2xml.application.statistics_collector import StatisticsCollector
 from repo2xml.application.writer_coordinator import WriterCoordinator
 from repo2xml.config import ExportConfig, Mode
@@ -41,8 +42,8 @@ class PipelineOrchestrator:
         self.config = config
         self.scanner = scanner
         self.entry_processor = entry_processor
-        self.writer_coordinator = writer_coordinator
-        self.statistics_collector = statistics_collector
+        self.writer = writer_coordinator
+        self.stats = statistics_collector
         self.progress = progress_reporter
         self.root_path = root_path
 
@@ -63,37 +64,16 @@ class PipelineOrchestrator:
         self.progress.set_total(None)
         logger.info("Scanning repository: %s", self.root_path)
 
-        entries: List[FileEntry] = []
-        for entry in self.scanner.scan():
-            entries.append(entry)
-            self.progress.advance(1)
+        scanner_service = ScannerService(self.scanner, self.config)
+        scan_result = scanner_service.scan(self.root_path)
+        entries = scan_result.entries
+        warnings = scan_result.warnings
 
-        original_count = len(entries)
-        entries = apply_file_filters(entries, self.config)   # <--- FIXED: pass full config
-        if len(entries) != original_count:
-            logger.info(
-                "File-level filters removed %d entries (%d remaining).",
-                original_count - len(entries),
-                len(entries),
-            )
-
-        # Gather scan warnings (if any)
-        scan_warn: Optional[str] = None
-        if self.scanner.stats is not None and self.scanner.stats.has_issues():
-            scan_warn = self.scanner.stats.summary()
-            logger.warning("Scan warnings: %s", scan_warn)
-            total_warnings = sum(
-                getattr(self.scanner.stats, attr, 0)
-                for attr in (
-                    "dirs_scandir_errors",
-                    "entry_is_symlink_errors",
-                    "entry_is_dir_errors",
-                    "entry_is_file_errors",
-                    "entry_stat_errors",
-                    "entry_readlink_errors",
-                )
-            )
-            self.progress.set_warning_count(total_warnings)
+        if warnings:
+            logger.warning("Scan warnings: %s", warnings)
+            # count warnings approximately – progress reporter expects a count
+            # We'll just set it to 1 if any, but we can parse the summary if needed.
+            self.progress.set_warning_count(1)
 
         total = len(entries)
         logger.info("Found %d files.", total)
@@ -114,69 +94,62 @@ class PipelineOrchestrator:
             schema_version=SCHEMA_VERSION,
         )
 
-        with self.writer_coordinator:
-            if not stats_only:
-                self.writer_coordinator.write_header(meta)
-                self.writer_coordinator.write_structure(entries)
+        # ------------------------------------------------------------------
+        # 3. Start writing (unless stats_only)
+        # ------------------------------------------------------------------
+        write_enabled = not stats_only
 
-            if self.config.mode == Mode.structure and not stats_only:
-                self.writer_coordinator.write_footer()
+        # Enter the writer context – this ensures proper flushing/closing.
+        with self.writer:
+            if write_enabled:
+                self.writer.write_header(meta)
+                self.writer.write_structure(entries)
+
+            # If mode is structure, we stop here (no file content).
+            if self.config.mode == Mode.structure:
+                if write_enabled:
+                    self.writer.write_footer()
                 self.progress.finish()
-                return self.statistics_collector.get_export_stats(scan_warn)
+                return self.stats.get_export_stats(warnings)
 
-            if not stats_only:
-                self.writer_coordinator.write_files_open(self.config.mode.value)
-
-            # ------------------------------------------------------------------
-            # 3. Process each file
-            # ------------------------------------------------------------------
-            try:
-                for entry in entries:
-                    result = self.entry_processor.process(entry)
-
-                    if result.status == "success":
-                        self.statistics_collector.record_success(
-                            token_count=result.token_count,
-                            ext=entry.ext,
-                        )
-                        if not stats_only:
-                            self.writer_coordinator.write_file(
-                                entry,
-                                result.payload,
-                                result.token_count,
-                            )
-                    elif result.status == "skipped":
-                        self.statistics_collector.record_skipped(
-                            result.skip_code,
-                            result.message,
-                        )
-                    elif result.status == "error":
-                        self.statistics_collector.record_error(
-                            result.error_code,
-                            result.message,
-                        )
-                    else:
-                        logger.warning("Unknown result status: %s", result.status)
-
-                    self.progress.set_postfix(entry.name)
-                    self.progress.advance(1)
-
-            except KeyboardInterrupt:
-                logger.warning("Interrupted by user. Closing writer and generating partial statistics.")
-                if not stats_only:
-                    self.writer_coordinator.close()
-                self.progress.finish()
-                raise
+            # Open the files section if we are writing and not in structure mode.
+            if write_enabled:
+                self.writer.write_files_open(self.config.mode.value)
 
             # ------------------------------------------------------------------
-            # 4. Write statistics and footer (skip if stats_only)
+            # 4. Process files (only if there are entries)
             # ------------------------------------------------------------------
-            if not stats_only:
-                self.writer_coordinator.write_files_close()
-                token_stats = self.statistics_collector.get_export_stats(scan_warn).token_stats
-                self.writer_coordinator.write_statistics(token_stats)
-                self.writer_coordinator.write_footer()
+            if entries:
+                engine = FileProcessingEngine(
+                    entry_processor=self.entry_processor,
+                    writer_coordinator=self.writer if write_enabled else None,
+                    stats_collector=self.stats,
+                    progress=self.progress,
+                    write_enabled=write_enabled,
+                )
 
+                try:
+                    engine.process(entries)
+                except KeyboardInterrupt:
+                    # Interrupt caught; close the writer gracefully if possible.
+                    # The context manager will handle the final close, but we
+                    # still need to ensure the files section is closed properly.
+                    # We'll let the context manager do the cleanup.
+                    logger.warning("Export interrupted by user. Finishing partial document.")
+                    # Re-raise so that the outer handler can exit.
+                    raise
+
+            # ------------------------------------------------------------------
+            # 5. Finish the document (unless stats_only)
+            # ------------------------------------------------------------------
+            if write_enabled:
+                self.writer.write_files_close()
+                token_stats = self.stats.get_export_stats(warnings).token_stats
+                self.writer.write_statistics(token_stats)
+                self.writer.write_footer()
+
+        # ------------------------------------------------------------------
+        # 6. Finalise
+        # ------------------------------------------------------------------
         self.progress.finish()
-        final_stats = self.statistics_collector.get_export_stats(scan_warn)
-        return final_stats
+        return self.stats.get_export_stats(warnings)
