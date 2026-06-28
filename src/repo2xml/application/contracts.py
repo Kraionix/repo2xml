@@ -16,7 +16,7 @@ from repo2xml.domain.model import (
     TextReadResult,
     TokenStats,
 )
-from repo2xml.services.scan.gitignore import IgnoreRuleset
+from repo2xml.domain.ignore import IgnoreRuleset
 from repo2xml.services.serialize.base import WriteFn
 
 

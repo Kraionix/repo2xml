@@ -11,7 +11,7 @@ from rich.console import Console
 from rich.table import Table
 
 from repo2xml.application.progress import NullProgressReporter, RichProgressReporter
-from repo2xml.cli.reporting import build_tree, print_breakdown
+from repo2xml.cli.reporting import build_tree, print_breakdown, print_scan_error_breakdown
 from repo2xml.cli.ui import LogLevel
 from repo2xml.config import (
     BinaryHandlingConfig,
@@ -114,6 +114,7 @@ def execute_export(
     classify_config: Optional[Path],
     count_tokens: bool,
     tokenizer_model: str,
+    verbose_errors: bool = False,
 ) -> None:
     """Run the full repo2xml export workflow."""
     if version:
@@ -288,9 +289,14 @@ def execute_export(
         if stats.scan_warning_summary:
             logger.warning("Scan warnings: %s", stats.scan_warning_summary)
 
+        # ---- Detailed reports ----
         if report:
             print_breakdown("Skipped by cause", stats.skipped_by_code, console)
             print_breakdown("Errors by cause", stats.errors_by_code, console)
+
+            # Scan error breakdown
+            if stats.scan_stats:
+                print_scan_error_breakdown(stats.scan_stats, console, verbose=verbose_errors)
 
             if stats.redaction_stats:
                 rs = stats.redaction_stats
@@ -379,14 +385,23 @@ def execute_restore(
     restore_mtime: bool,
     create_empty: bool,
     report: bool,
+    allow_absolute_symlinks: bool = False,
     strict_validation: bool = True,
+    verbose_errors: bool = False,
 ) -> None:
     """Run the restore workflow."""
+    # Validate output directory exists and is accessible
+    output_root = output.resolve()
+    if output_root.exists() and not output_root.is_dir():
+        logger.error("Output path exists and is not a directory: %s", output_root)
+        raise typer.Exit(code=2)
+
     config = RestoreConfig(
         overwrite=overwrite,
         restore_mtime=restore_mtime,
         create_empty_for_missing=create_empty,
         strict_validation=strict_validation,
+        allow_absolute_symlinks=allow_absolute_symlinks,
     )
     config.normalize()
     config.validate()

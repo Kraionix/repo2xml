@@ -1,5 +1,7 @@
+# src/repo2xml/services/output/targets.py
 from __future__ import annotations
 
+import contextlib
 import gzip
 import io
 import os
@@ -21,29 +23,49 @@ class CompressMode(str, Enum):
     zstd = "zstd"
 
 
+@contextmanager
 def open_output_stream(
     *,
     output_path: Path,
     use_stdout: bool,
     compress: CompressMode,
-) -> Tuple[BinaryIO, Callable[[], None]]:
+) -> Generator[BinaryIO, None, None]:
     """
     Open an output stream for the document bytes.
     Handles File vs Stdout and Compression transparently.
 
-    Returns: (binary_stream, closer_callback)
+    Uses ExitStack for guaranteed resource cleanup.
+
+    Yields:
+        A writable binary stream.
 
     Raises:
         OutputError: On missing compression dependencies or filesystem errors.
     """
-    if use_stdout:
-        base: BinaryIO = sys.stdout.buffer
+    with contextlib.ExitStack() as stack:
+        if use_stdout:
+            base: BinaryIO = sys.stdout.buffer
+        else:
+            try:
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                raw = open(output_path, "wb")
+                base = stack.enter_context(raw)
+            except OSError as e:
+                raise OutputError(f"Cannot open output file: {output_path} ({e})") from e
+
         if compress == CompressMode.none:
-            return base, lambda: None
+            yield base
+            return
 
         if compress == CompressMode.gzip:
-            gz = gzip.GzipFile(fileobj=base, mode="wb")
-            return gz, gz.close
+            try:
+                gz = gzip.GzipFile(fileobj=base, mode="wb")
+                # Register the gzip wrapper for cleanup
+                stack.enter_context(gz)
+                yield gz
+            except Exception as e:
+                raise OutputError(f"Failed to create gzip compressor: {e}") from e
+            return
 
         if compress == CompressMode.zstd:
             try:
@@ -51,45 +73,18 @@ def open_output_stream(
             except ImportError as e:
                 raise OutputError("zstd compression requires: pip install zstandard") from e
 
-            cctx = zstd.ZstdCompressor(level=3)
-            zw = cctx.stream_writer(base)
-            return zw, zw.close
+            try:
+                cctx = zstd.ZstdCompressor(level=3)
+                zw = cctx.stream_writer(base)
+                # zstandard stream writer doesn't support context manager directly,
+                # so we register a callback to close it.
+                stack.callback(zw.close)
+                yield zw
+            except Exception as e:
+                raise OutputError(f"Failed to create zstd compressor: {e}") from e
+            return
 
         raise OutputError(f"Unknown compression mode: {compress!r}")
-
-    # File output
-    try:
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        raw = open(output_path, "wb")
-    except OSError as e:
-        raise OutputError(f"Cannot open output file: {output_path} ({e})") from e
-
-    if compress == CompressMode.none:
-        return raw, raw.close
-
-    if compress == CompressMode.gzip:
-        gz = gzip.GzipFile(fileobj=raw, mode="wb")
-        return gz, lambda: (gz.close(), raw.close())
-
-    if compress == CompressMode.zstd:
-        try:
-            import zstandard as zstd  # type: ignore
-        except ImportError as e:
-            try:
-                raw.close()
-            except Exception:
-                pass
-            raise OutputError("zstd compression requires: pip install zstandard") from e
-
-        cctx = zstd.ZstdCompressor(level=3)
-        zw = cctx.stream_writer(raw)
-        return zw, lambda: (zw.close(), raw.close())
-
-    try:
-        raw.close()
-    except Exception:
-        pass
-    raise OutputError(f"Unknown compression mode: {compress!r}")
 
 
 class OutputTarget(ABC):
@@ -113,18 +108,12 @@ class FileTarget(OutputTarget):
 
     @contextmanager
     def open(self) -> Generator[BinaryIO, None, None]:
-        stream, closer = open_output_stream(
+        with open_output_stream(
             output_path=self.path,
             use_stdout=False,
             compress=self.compress,
-        )
-        try:
+        ) as stream:
             yield stream
-        finally:
-            try:
-                closer()
-            except Exception:
-                pass
 
     def describe(self) -> str:
         return f"file://{self.path}"
@@ -136,18 +125,12 @@ class StdoutTarget(OutputTarget):
 
     @contextmanager
     def open(self) -> Generator[BinaryIO, None, None]:
-        stream, closer = open_output_stream(
+        with open_output_stream(
             output_path=Path(os.devnull),  # unused for stdout
             use_stdout=True,
             compress=self.compress,
-        )
-        try:
+        ) as stream:
             yield stream
-        finally:
-            try:
-                closer()
-            except Exception:
-                pass
 
     def describe(self) -> str:
         return "stdout"

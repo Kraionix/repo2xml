@@ -10,22 +10,15 @@ from pathlib import Path
 from typing import BinaryIO, List, Optional, Union
 
 from repo2xml.application.contracts import ProgressReporter
-from repo2xml.application.entry_processor import EntryProcessor
-from repo2xml.application.pipeline_orchestrator import PipelineOrchestrator
+from repo2xml.application.factories import ExportComponentFactory
 from repo2xml.application.statistics_collector import StatisticsCollector
-from repo2xml.application.writer_coordinator import WriterCoordinator
 from repo2xml.application.filters import apply_file_filters
 from repo2xml.config import ExportConfig, RestoreConfig
 from repo2xml.domain.exceptions import ConfigurationError, FacadeError
 from repo2xml.domain.model import ExportStats, FileEntry, RestoreStats
-from repo2xml.services.classify import ClassificationEngine
-from repo2xml.services.ingest.ingestor import StandardIngestor
-from repo2xml.services.ingest.redact import RedactionEngine
-from repo2xml.services.output.targets import OutputTarget
 from repo2xml.services.scan.gitignore import GitignoreEngine
 from repo2xml.services.scan.registry import create_scanner
-from repo2xml.services.serialize.factory import get_format_factory
-from repo2xml.services.tokenize import create_token_counter
+from repo2xml.services.output.targets import OutputTarget
 
 logger = logging.getLogger("repo2xml.facade")
 
@@ -83,15 +76,17 @@ class RepoXML:
         self._validate_dependencies(config)
 
         # ------------------------------------------------------------------
-        # 2. Build all components
+        # 2. Build all components via factory
         # ------------------------------------------------------------------
-        components = self._build_export_components(config, root, output_stream, progress)
+        output_target = StreamTarget(output_stream)
+        factory = ExportComponentFactory(config, root, output_target, progress)
+        orchestrator, collector = factory.build()
 
         # ------------------------------------------------------------------
         # 3. Run the pipeline
         # ------------------------------------------------------------------
         try:
-            stats = components.orchestrator.execute(stats_only=stats_only)
+            stats = orchestrator.execute(stats_only=stats_only)
         except KeyboardInterrupt:
             raise
         except Exception as e:
@@ -121,133 +116,6 @@ class RepoXML:
                     "Token counting requires the 'transformers' library. "
                     "Install with: pip install repo2xml[tokens]"
                 )
-
-    def _build_export_components(
-        self,
-        config: ExportConfig,
-        root: Path,
-        output_stream: BinaryIO,
-        progress: Optional[ProgressReporter],
-    ) -> ExportComponents:
-        """
-        Create and wire all components for the export pipeline.
-
-        Returns:
-            ExportComponents containing orchestrator and statistics collector.
-        """
-        # --- Progress reporter ---
-        if progress is None:
-            from repo2xml.application.progress import NullProgressReporter
-            reporter = NullProgressReporter()
-        else:
-            reporter = progress
-
-        # --- Gitignore provider ---
-        gitignore_engine = GitignoreEngine(
-            root_path=root,
-            user_ignore=config.scan.ignore_patterns,
-            user_include=config.scan.include_patterns,
-        )
-
-        # --- Scanner ---
-        scanner = create_scanner(
-            config.scan.source,
-            root_path=root,
-            ignore_provider=gitignore_engine,
-            use_gitignore=config.scan.use_gitignore,
-            follow_symlinks_dirs=config.scan.follow_symlinks_dirs,
-            symlinks_files=config.scan.symlinks_files.value,
-            hard_exclude_dirs=set(config.scan.hard_exclude_dirs),
-            **config.scan.source_options,
-        )
-
-        # --- Ingestor ---
-        ingestor = StandardIngestor(
-            newline_mode=config.text.newline.value,
-            decode_errors=config.text.decode_errors.value,
-        )
-
-        # --- Classification engine ---
-        classification_engine = ClassificationEngine(
-            root,
-            config_path=config.classify.config_path,
-        )
-
-        # --- Redaction engine (optional) ---
-        redaction_engine = None
-        if config.redact.enabled:
-            redaction_engine = RedactionEngine(
-                root_path=root,
-                config_path=config.redact.config_path,
-            )
-
-        # --- Token counter (optional) ---
-        token_counter = None
-        if config.token.enabled:
-            token_counter = create_token_counter(
-                "huggingface",
-                model=config.token.model,
-            )
-
-        # --- Payload builder ---
-        from repo2xml.application.policies import ExportPayloadBuilder
-        payload_builder = ExportPayloadBuilder(
-            mode=config.mode,
-            binary=config.binary,
-            text=config.text,
-            symlinks_files=config.scan.symlinks_files,
-            ingestor=ingestor,
-        )
-
-        # --- Serializer ---
-        factory = get_format_factory(config.format)
-        serializer = factory.create_serializer(
-            formatting=config.output.formatting.value,
-            include_mtime=config.output.include_mtime,
-            include_size=config.output.include_size,
-            text_decode_errors=config.text.decode_errors.value,
-        )
-
-        # --- Output target (wrap the provided stream) ---
-        output_target = StreamTarget(output_stream)
-
-        # --- Writer coordinator ---
-        writer_coordinator = WriterCoordinator(
-            metadata_writer=serializer,
-            structure_writer=serializer,
-            section_writer=serializer,
-            content_writer=serializer,
-            output_target=output_target,
-            buffer_chars=config.output.write_buffer_chars,
-        )
-
-        # --- Statistics collector ---
-        collector = StatisticsCollector(
-            token_counting_enabled=config.token.enabled and token_counter is not None,
-        )
-
-        # --- Entry processor ---
-        entry_processor = EntryProcessor(
-            config=config,
-            ingestor=ingestor,
-            classification_engine=classification_engine,
-            redaction_engine=redaction_engine,
-            token_counter=token_counter,
-            payload_builder=payload_builder,
-        )
-
-        # --- Pipeline orchestrator ---
-        orchestrator = PipelineOrchestrator(
-            config=config,
-            scanner=scanner,
-            entry_processor=entry_processor,
-            writer_coordinator=writer_coordinator,
-            statistics_collector=collector,
-            progress_reporter=reporter,
-            root_path=root,
-        )
-
-        return ExportComponents(orchestrator=orchestrator, collector=collector)
 
     # ------------------------------------------------------------------
     # Other public methods

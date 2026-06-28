@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
-# Using modern GitIgnoreSpecPattern from pathspec >= 1.0
 from pathspec.patterns.gitignore.spec import GitIgnoreSpecPattern
+
+from repo2xml.domain.ignore import IgnoreRuleset
 
 logger = logging.getLogger("repo2xml.gitignore")
 
@@ -28,23 +29,6 @@ ALWAYS_IGNORE = [
     "dist",
     "build",
 ]
-
-
-@dataclass(slots=True, frozen=True)
-class IgnoreRuleset:
-    """
-    A compiled ignore ruleset with a base directory scope.
-
-    base_dir_rel:
-      - POSIX path relative to repo root ("" for root)
-    base_prefix:
-      - base_dir_rel + "/" ("" for root), used for fast subpath derivation
-    patterns:
-      - compiled gitignore patterns in original file order
-    """
-    base_dir_rel: str
-    base_prefix: str
-    patterns: Tuple[GitIgnoreSpecPattern, ...]
 
 
 def _rstrip_unescaped_trailing_ws(s: str) -> str:

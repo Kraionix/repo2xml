@@ -4,14 +4,14 @@ from __future__ import annotations
 import logging
 import os
 import stat
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Generator, Optional, Set, Union, Sequence
+from typing import Generator, Optional, Set, Union, Sequence, Dict, List, Tuple
 
 from repo2xml.application.contracts import IgnoreProvider
 from repo2xml.config import SymlinkFilesMode
 from repo2xml.domain.model import FileEntry
-from repo2xml.services.scan.gitignore import IgnoreRuleset
+from repo2xml.domain.ignore import IgnoreRuleset
 
 logger = logging.getLogger("repo2xml.scanner")
 
@@ -24,6 +24,8 @@ class ScanStats:
     We avoid logging per-file errors, because on some systems (Windows locks, permissions)
     this can easily produce thousands of lines. Instead we collect counters and emit a
     single summary warning after scanning.
+
+    Extended with detailed error tracking.
     """
     dirs_scandir_errors: int = 0
     entry_is_symlink_errors: int = 0
@@ -31,6 +33,18 @@ class ScanStats:
     entry_is_file_errors: int = 0
     entry_stat_errors: int = 0
     entry_readlink_errors: int = 0
+
+    # Detailed error tracking
+    errors_by_type: Dict[str, int] = field(default_factory=dict)
+    error_examples: List[Tuple[str, str]] = field(default_factory=list)  # (rel_path, error_message)
+    _max_examples: int = 10
+
+    def record_error(self, rel_path: str, error: Exception) -> None:
+        """Record an error with its type and optional example."""
+        error_type = type(error).__name__
+        self.errors_by_type[error_type] = self.errors_by_type.get(error_type, 0) + 1
+        if len(self.error_examples) < self._max_examples:
+            self.error_examples.append((rel_path, str(error)))
 
     def has_issues(self) -> bool:
         return any(
@@ -43,7 +57,7 @@ class ScanStats:
                 self.entry_stat_errors,
                 self.entry_readlink_errors,
             )
-        )
+        ) or bool(self.errors_by_type)
 
     def summary(self) -> str:
         parts: list[str] = []
@@ -59,6 +73,9 @@ class ScanStats:
             parts.append(f"entry_stat_errors={self.entry_stat_errors}")
         if self.entry_readlink_errors:
             parts.append(f"entry_readlink_errors={self.entry_readlink_errors}")
+        if self.errors_by_type:
+            by_type = ", ".join(f"{k}={v}" for k, v in self.errors_by_type.items())
+            parts.append(f"by_type: {by_type}")
         return ", ".join(parts) if parts else "no issues"
 
 
@@ -188,7 +205,8 @@ class FileSystemScanner:
                 it = os.scandir(dir_abs)
             except OSError as e:
                 self.stats.dirs_scandir_errors += 1
-                logger.warning("Cannot read directory: %s (%s)", dir_abs, e)
+                self.stats.record_error(dir_rel, e)
+                logger.debug("Cannot read directory: %s (%s)", dir_abs, e)
                 # If we pushed a ruleset, the exit frame is already on the stack and will pop it.
                 continue
 
@@ -204,8 +222,10 @@ class FileSystemScanner:
 
                     try:
                         is_symlink = entry.is_symlink()
-                    except OSError:
+                    except OSError as e:
                         self.stats.entry_is_symlink_errors += 1
+                        self.stats.record_error(rel, e)
+                        logger.debug("is_symlink error for %s: %s", rel, e)
                         is_symlink = False
 
                     # Directory detection:
@@ -216,8 +236,10 @@ class FileSystemScanner:
                             is_dir = entry.is_dir(follow_symlinks=self.follow_symlinks_dirs)
                         else:
                             is_dir = entry.is_dir(follow_symlinks=False)
-                    except OSError:
+                    except OSError as e:
                         self.stats.entry_is_dir_errors += 1
+                        self.stats.record_error(rel, e)
+                        logger.debug("is_dir error for %s: %s", rel, e)
                         is_dir = False
 
                     # Git-compatible ignore check (scoped).
@@ -255,14 +277,18 @@ class FileSystemScanner:
                         symlink_target: Optional[str] = None
                         try:
                             symlink_target = os.readlink(entry.path)
-                        except OSError:
+                        except OSError as e:
                             self.stats.entry_readlink_errors += 1
+                            self.stats.record_error(rel, e)
+                            logger.debug("readlink error for %s: %s", rel, e)
                             symlink_target = None
 
                         try:
                             st = entry.stat(follow_symlinks=False)
-                        except OSError:
+                        except OSError as e:
                             self.stats.entry_stat_errors += 1
+                            self.stats.record_error(rel, e)
+                            logger.debug("stat error for %s: %s", rel, e)
                             continue
 
                         yield FileEntry(
@@ -283,8 +309,10 @@ class FileSystemScanner:
                     #   instead of calling entry.is_file() and then entry.stat() again.
                     try:
                         st = entry.stat(follow_symlinks=True)
-                    except OSError:
+                    except OSError as e:
                         self.stats.entry_stat_errors += 1
+                        self.stats.record_error(rel, e)
+                        logger.debug("stat error for %s: %s", rel, e)
                         continue
 
                     if not stat.S_ISREG(st.st_mode):
@@ -294,8 +322,10 @@ class FileSystemScanner:
                     if is_symlink:
                         try:
                             symlink_target = os.readlink(entry.path)
-                        except OSError:
+                        except OSError as e:
                             self.stats.entry_readlink_errors += 1
+                            self.stats.record_error(rel, e)
+                            logger.debug("readlink error for %s: %s", rel, e)
                             symlink_target = None
 
                     yield FileEntry(

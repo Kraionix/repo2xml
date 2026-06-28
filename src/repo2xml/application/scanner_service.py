@@ -9,12 +9,14 @@ from repo2xml.application.contracts import ScannerLike
 from repo2xml.application.filters import apply_file_filters
 from repo2xml.config import ExportConfig
 from repo2xml.domain.model import FileEntry
+from repo2xml.services.scan.scanner import ScanStats
 
 
 @dataclass(slots=True)
 class ScanResult:
     """Result of a scan operation."""
     entries: List[FileEntry]
+    stats: ScanStats
     warnings: Optional[str] = None
 
 
@@ -45,7 +47,8 @@ class ScannerService:
         entries = apply_file_filters(entries, self.config)
 
         warnings: Optional[str] = None
-        if self.scanner.stats is not None and self.scanner.stats.has_issues():
-            warnings = self.scanner.stats.summary()
+        stats = self.scanner.stats
+        if stats is not None and stats.has_issues():
+            warnings = stats.summary()
 
-        return ScanResult(entries=entries, warnings=warnings)
+        return ScanResult(entries=entries, stats=stats or ScanStats(), warnings=warnings)

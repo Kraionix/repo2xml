@@ -33,6 +33,7 @@ class RestorePipeline:
             skip_existing=not self.config.overwrite,
             restore_mtime=self.config.restore_mtime,
             create_empty_for_missing=self.config.create_empty_for_missing,
+            allow_absolute_symlinks=self.config.allow_absolute_symlinks,
         )
         stats = restorer.restore(repository.files)
         progress.set_total(stats.files_total)  # adjust for display

@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Dict, Optional
 
 from repo2xml.domain.model import ExportStats, TokenStats
+from repo2xml.services.scan.scanner import ScanStats
 
 
 class StatisticsCollector:
@@ -26,9 +27,10 @@ class StatisticsCollector:
         self._token_stats: Optional[TokenStats] = TokenStats() if token_counting_enabled else None
         self._token_counting_enabled = token_counting_enabled
 
-        # Redaction and classification stats (optional)
+        # Redaction, classification, and scan stats (optional)
         self._redaction_stats: Optional[object] = None
         self._classification_stats: Optional[object] = None
+        self._scan_stats: Optional[ScanStats] = None
 
     def record_success(self, token_count: Optional[int] = None, ext: str = "") -> None:
         """Record a successfully processed file."""
@@ -63,6 +65,10 @@ class StatisticsCollector:
         """Store classification statistics (if any)."""
         self._classification_stats = stats
 
+    def set_scan_stats(self, stats: ScanStats) -> None:
+        """Store scan statistics (if any)."""
+        self._scan_stats = stats
+
     def get_export_stats(self, scan_warning_summary: Optional[str] = None) -> ExportStats:
         """Return the final ExportStats object."""
         token_stats = self._token_stats
@@ -77,6 +83,7 @@ class StatisticsCollector:
             redaction_stats=self._redaction_stats,
             classification_stats=self._classification_stats,
             token_stats=token_stats,
+            scan_stats=self._scan_stats,
         )
 
     def reset(self) -> None:
@@ -92,3 +99,4 @@ class StatisticsCollector:
             self._token_stats = None
         self._redaction_stats = None
         self._classification_stats = None
+        self._scan_stats = None

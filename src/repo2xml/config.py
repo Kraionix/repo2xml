@@ -216,7 +216,7 @@ class ExportConfig:
 
 
 # ----------------------------------------------------------------------
-# RestoreConfig (unchanged)
+# RestoreConfig (enhanced with security flags)
 # ----------------------------------------------------------------------
 
 @dataclass(slots=True)
@@ -226,6 +226,7 @@ class RestoreConfig:
     restore_mtime: bool = True
     create_empty_for_missing: bool = False
     strict_validation: bool = True
+    allow_absolute_symlinks: bool = False   # Security: if False, absolute symlinks are rejected
 
     def normalize(self) -> None:
         self.format = (self.format or "xml").strip().lower()

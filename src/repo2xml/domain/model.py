@@ -4,7 +4,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Iterable, Iterator, List, Literal, Optional, Union, Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, Iterable, Iterator, List, Literal, Optional, Union
+
+if TYPE_CHECKING:
+    from repo2xml.services.scan.scanner import ScanStats
 
 
 @dataclass(slots=True)
@@ -97,6 +100,7 @@ class ExportStats:
     redaction_stats: Optional[Any] = None
     classification_stats: Optional[Any] = None
     token_stats: Optional[TokenStats] = None
+    scan_stats: Optional["ScanStats"] = None   # Detailed scan error statistics
 
 
 @dataclass(slots=True)

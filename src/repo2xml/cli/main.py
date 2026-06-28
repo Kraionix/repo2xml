@@ -67,6 +67,8 @@ def main(
     # Token counting options
     count_tokens: bool = typer.Option(False, "--count-tokens/--no-count-tokens", help="Count tokens in text files."),
     tokenizer_model: str = typer.Option("deepseek-ai/DeepSeek-V4-Pro", "--tokenizer-model", help="Hugging Face model for tokenization."),
+    # Verbose error reporting
+    verbose_errors: bool = typer.Option(False, "--verbose-errors", help="Show detailed error examples in reports."),
 ) -> None:
     """repo2xml: convert a repository into a single context document for LLM ingestion."""
     console = Console(no_color=no_color)
@@ -114,6 +116,7 @@ def main(
         classify_config=classify_config,
         count_tokens=count_tokens,
         tokenizer_model=tokenizer_model,
+        verbose_errors=verbose_errors,
     )
 
 
@@ -128,6 +131,8 @@ def restore(
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress non-error output."),
     no_color: bool = typer.Option(False, "--no-color", help="Disable colored output."),
     no_strict_validation: bool = typer.Option(False, "--no-strict-validation", help="Skip strict XML validation before restoration."),
+    allow_absolute_symlinks: bool = typer.Option(False, "--allow-absolute-symlinks", help="Allow symlinks with absolute targets (security risk)."),
+    verbose_errors: bool = typer.Option(False, "--verbose-errors", help="Show detailed error examples in reports."),
 ) -> None:
     """Restore a repository from a repo2xml XML export."""
     console = Console(no_color=no_color)
@@ -140,5 +145,7 @@ def restore(
         restore_mtime=not no_mtime,
         create_empty=create_empty,
         report=report,
+        allow_absolute_symlinks=allow_absolute_symlinks,
         strict_validation=not no_strict_validation,
+        verbose_errors=verbose_errors,
     )

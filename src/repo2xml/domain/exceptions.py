@@ -32,3 +32,7 @@ class RestoreError(Repo2XMLError):
 
 class UnsupportedPayloadError(Repo2XMLError):
     """A payload type is not supported by the chosen format."""
+
+
+class RestoreSecurityError(RestoreError):
+    """Security violation during restore (path escape, unsafe symlink, etc.)."""
