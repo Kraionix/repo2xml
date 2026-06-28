@@ -1,4 +1,3 @@
-# tests/unit/application/steps/test_build_payload_step.py
 """Unit tests for BuildPayloadStep with the new policy chain."""
 
 from pathlib import Path
@@ -71,7 +70,7 @@ class TestBuildPayloadStep:
             BinaryPolicy(BinaryHandlingConfig(mode=BinaryMode.skip), MagicMock()),
             TextPolicy(TextHandlingConfig(max_text_size=1000), MagicMock()),
         ]
-        step = BuildPayloadStep(policies)
+        step = BuildPayloadStep(policies, mode=Mode.full)
         classification = ClassificationResult(kind="text")
         ctx = ProcessingContext(entry=entry)
         ctx.classification = classification
@@ -90,7 +89,7 @@ class TestBuildPayloadStep:
             BinaryPolicy(BinaryHandlingConfig(mode=BinaryMode.skip), MagicMock()),
             TextPolicy(TextHandlingConfig(max_text_size=1000), MagicMock()),
         ]
-        step = BuildPayloadStep(policies)
+        step = BuildPayloadStep(policies, mode=Mode.full)
         classification = ClassificationResult(kind="text")
         ctx = ProcessingContext(entry=entry)
         ctx.classification = classification
@@ -105,7 +104,7 @@ class TestBuildPayloadStep:
     def test_metadata_mode(self, entry: FileEntry) -> None:
         # In metadata mode, only ModePolicy is present in the chain.
         policies: list[FilePolicy] = [ModePolicy(Mode.metadata)]
-        step = BuildPayloadStep(policies)
+        step = BuildPayloadStep(policies, mode=Mode.metadata)
         classification = ClassificationResult(kind="text")
         ctx = ProcessingContext(entry=entry)
         ctx.classification = classification
@@ -121,7 +120,7 @@ class TestBuildPayloadStep:
             BinaryPolicy(BinaryHandlingConfig(mode=BinaryMode.skip), MagicMock()),
             TextPolicy(TextHandlingConfig(max_text_size=1000), MagicMock()),
         ]
-        step = BuildPayloadStep(policies)
+        step = BuildPayloadStep(policies, mode=Mode.full)
         classification = ClassificationResult(kind="error", error="failed")
         ctx = ProcessingContext(entry=entry)
         ctx.classification = classification
@@ -139,7 +138,7 @@ class TestBuildPayloadStep:
             BinaryPolicy(BinaryHandlingConfig(mode=BinaryMode.skip), ingestor),
             TextPolicy(TextHandlingConfig(max_text_size=1000), ingestor),
         ]
-        step = BuildPayloadStep(policies)
+        step = BuildPayloadStep(policies, mode=Mode.full)
         classification = ClassificationResult(kind="binary")
         ctx = ProcessingContext(entry=entry)
         ctx.classification = classification
@@ -156,7 +155,7 @@ class TestBuildPayloadStep:
             BinaryPolicy(BinaryHandlingConfig(mode=BinaryMode.hash), ingestor),
             TextPolicy(TextHandlingConfig(max_text_size=1000), ingestor),
         ]
-        step = BuildPayloadStep(policies)
+        step = BuildPayloadStep(policies, mode=Mode.full)
         classification = ClassificationResult(kind="binary")
         ctx = ProcessingContext(entry=entry)
         ctx.classification = classification
@@ -173,7 +172,7 @@ class TestBuildPayloadStep:
             BinaryPolicy(BinaryHandlingConfig(mode=BinaryMode.base64), ingestor),
             TextPolicy(TextHandlingConfig(max_text_size=1000), ingestor),
         ]
-        step = BuildPayloadStep(policies)
+        step = BuildPayloadStep(policies, mode=Mode.full)
         classification = ClassificationResult(kind="binary")
         ctx = ProcessingContext(entry=entry)
         ctx.classification = classification
@@ -190,7 +189,7 @@ class TestBuildPayloadStep:
             BinaryPolicy(BinaryHandlingConfig(mode=BinaryMode.skip), ingestor),
             TextPolicy(TextHandlingConfig(max_text_size=1000), ingestor),
         ]
-        step = BuildPayloadStep(policies)
+        step = BuildPayloadStep(policies, mode=Mode.full)
         classification = ClassificationResult(kind="text", encoding="utf-8", sample=b"sample")
         ctx = ProcessingContext(entry=entry)
         ctx.classification = classification
@@ -213,7 +212,7 @@ class TestBuildPayloadStep:
             BinaryPolicy(BinaryHandlingConfig(mode=BinaryMode.skip), ingestor),
             TextPolicy(TextHandlingConfig(max_text_size=10), ingestor),  # limit smaller than file size
         ]
-        step = BuildPayloadStep(policies)
+        step = BuildPayloadStep(policies, mode=Mode.full)
         classification = ClassificationResult(kind="text")
         ctx = ProcessingContext(entry=entry)
         ctx.classification = classification
@@ -236,7 +235,7 @@ class TestBuildPayloadStep:
             BinaryPolicy(BinaryHandlingConfig(mode=BinaryMode.skip), ingestor),
             TextPolicy(TextHandlingConfig(max_text_size=1000), ingestor),
         ]
-        step = BuildPayloadStep(policies)
+        step = BuildPayloadStep(policies, mode=Mode.full)
         classification = ClassificationResult(kind="text")
         ctx = ProcessingContext(entry=entry)
         ctx.classification = classification
@@ -246,3 +245,30 @@ class TestBuildPayloadStep:
         assert ctx.payload.code == ErrorCode.text_read_error
         assert ctx.is_success is False
         assert ctx.should_stop is True
+
+    def test_missing_classification_in_full_mode(self, entry: FileEntry) -> None:
+        """When classification is missing in full mode, BuildPayloadStep should set an error."""
+        policies: list[FilePolicy] = [
+            ErrorPolicy(),
+        ]
+        step = BuildPayloadStep(policies, mode=Mode.full)
+        ctx = ProcessingContext(entry=entry)
+        # Do NOT set ctx.classification
+        step.process(ctx)
+
+        assert ctx.should_stop is True
+        assert ctx.is_success is False
+        assert ctx.error_code == "missing_classification"
+        assert ctx.message == "Classification result is missing"
+
+    def test_missing_classification_in_metadata_mode(self, entry: FileEntry) -> None:
+        """In metadata mode, missing classification is acceptable because we skip ClassifyStep."""
+        policies: list[FilePolicy] = [ModePolicy(Mode.metadata)]
+        step = BuildPayloadStep(policies, mode=Mode.metadata)
+        ctx = ProcessingContext(entry=entry)
+        # No classification set – should be fine in metadata mode
+        step.process(ctx)
+
+        assert isinstance(ctx.payload, MetadataPayload)
+        assert ctx.is_success is True
+        assert ctx.should_stop is False

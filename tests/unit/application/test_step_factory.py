@@ -1,4 +1,3 @@
-# tests/unit/application/test_step_factory.py
 """Unit tests for StepFactory."""
 
 from pathlib import Path
@@ -168,7 +167,6 @@ class TestStepFactory:
         policies: list[FilePolicy] = [ModePolicy(Mode.metadata)]
         factory = StepFactory(config, services, policies)
         steps = factory.create_steps()
-        # Metadata mode: still ClassifyStep and BuildPayloadStep
-        assert len(steps) == 2
-        assert isinstance(steps[0], ClassifyStep)
-        assert isinstance(steps[1], BuildPayloadStep)
+        # Metadata mode: ClassifyStep is skipped, only BuildPayloadStep remains
+        assert len(steps) == 1
+        assert isinstance(steps[0], BuildPayloadStep)

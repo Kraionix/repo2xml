@@ -1,6 +1,6 @@
-# tests/unit/application/test_writer.py
 """Unit tests for BufferedTextWriter and WriterCoordinator."""
 
+import io
 from io import StringIO
 from unittest.mock import MagicMock, call
 
@@ -54,6 +54,26 @@ class TestBufferedTextWriter:
         flush_fn.assert_not_called()
 
 
+# Helper class to provide a real BytesIO stream for testing
+class BytesIOOutputTarget(OutputTarget):
+    def __init__(self) -> None:
+        self._buffer = io.BytesIO()
+
+    def open(self):
+        class CM:
+            def __enter__(self2):
+                return self._buffer
+            def __exit__(self2, *args):
+                pass
+        return CM()
+
+    def describe(self) -> str:
+        return "test-bytesio"
+
+    def getvalue(self) -> bytes:
+        return self._buffer.getvalue()
+
+
 class TestWriterCoordinator:
     @pytest.fixture
     def mock_metadata_writer(self) -> MagicMock:
@@ -72,13 +92,8 @@ class TestWriterCoordinator:
         return MagicMock()
 
     @pytest.fixture
-    def mock_output_target(self) -> MagicMock:
-        target = MagicMock(spec=OutputTarget)
-        mock_cm = MagicMock()
-        target.open.return_value = mock_cm
-        mock_cm.__enter__ = MagicMock(return_value=MagicMock())
-        mock_cm.__exit__ = MagicMock(return_value=False)
-        return target
+    def real_output_target(self) -> BytesIOOutputTarget:
+        return BytesIOOutputTarget()
 
     @pytest.fixture
     def coordinator(
@@ -87,22 +102,24 @@ class TestWriterCoordinator:
         mock_structure_writer,
         mock_section_writer,
         mock_content_writer,
-        mock_output_target,
+        real_output_target,
     ) -> WriterCoordinator:
         return WriterCoordinator(
             metadata_writer=mock_metadata_writer,
             structure_writer=mock_structure_writer,
             section_writer=mock_section_writer,
             content_writer=mock_content_writer,
-            output_target=mock_output_target,
+            output_target=real_output_target,
             buffer_chars=10,
         )
 
-    def test_context_manager(self, coordinator, mock_output_target) -> None:
+    def test_context_manager(self, coordinator, real_output_target) -> None:
         with coordinator as c:
             assert c is coordinator
-            mock_output_target.open.assert_called_once()
-            mock_output_target.open.return_value.__enter__.assert_called_once()
+            assert coordinator._stream is not None
+            assert coordinator._text_wrapper is not None
+            assert coordinator._buffered_writer is not None
+        # After exit, resources should be cleaned up
         assert coordinator._stream is None
         assert coordinator._text_wrapper is None
         assert coordinator._buffered_writer is None
@@ -152,6 +169,7 @@ class TestWriterCoordinator:
             coordinator.write_header(MagicMock())
 
     def test_close_handles_errors(self, coordinator) -> None:
+        # Manually set up a mock to simulate error on flush
         coordinator._text_wrapper = MagicMock()
         coordinator._text_wrapper.flush.side_effect = OSError("flush failed")
         coordinator._stream = MagicMock()
