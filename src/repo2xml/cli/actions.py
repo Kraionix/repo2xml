@@ -240,6 +240,18 @@ def execute_restore(
     verbose_errors: bool = False,
 ) -> None:
     """Run the restore workflow."""
+    # Warn if absolute symlinks are allowed.
+    if allow_absolute_symlinks:
+        console.print(
+            "[bold yellow]⚠️  WARNING: --allow-absolute-symlinks is enabled.[/bold yellow]"
+        )
+        console.print(
+            "[yellow]   Absolute symlinks can point outside the output root and pose a security risk.[/yellow]"
+        )
+        console.print(
+            "[yellow]   Ensure you trust the source of the XML file.[/yellow]"
+        )
+
     output_root = output.resolve()
     if output_root.exists() and not output_root.is_dir():
         logger.error("Output path exists and is not a directory: %s", output_root)

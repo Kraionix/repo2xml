@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import codecs
 import logging
 import os
 from pathlib import Path
@@ -232,9 +233,22 @@ class FilesystemRestorer:
         fpath = self._abs_path(entry.rel_path)
         if fpath.exists() and self.skip_existing:
             return
+        # Determine which encoding to use for writing.
+        # Prefer the encoding stored in the payload; fall back to UTF-8.
+        encoding = payload.encoding or "utf-8"
+        # Validate that the encoding is known to Python.
         try:
-            # Write as UTF-8 by default; if original encoding known and needed, could re-encode.
-            fpath.write_text(payload.text, encoding="utf-8")
+            codecs.lookup(encoding)
+        except LookupError:
+            logger.warning(
+                "Unknown encoding %r for %s, falling back to UTF-8",
+                encoding,
+                entry.rel_path,
+            )
+            encoding = "utf-8"
+
+        try:
+            fpath.write_text(payload.text, encoding=encoding, errors="replace")
         except OSError as e:
             raise RestoreError(f"Cannot write {entry.rel_path}: {e}") from e
         self._apply_mtime(fpath, entry.mtime_ns)
