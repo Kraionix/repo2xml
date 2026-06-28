@@ -3,7 +3,7 @@
 Convert a source code repository into a single, structured context document for LLM ingestion.
 Supports the reverse operation: restore a full repository from an XML export.
 
-**Version 0.4.0**
+**Version 0.5.0**
 
 ---
 
@@ -30,6 +30,7 @@ Supports the reverse operation: restore a full repository from an XML export.
   - Skip or overwrite existing files
   - Comprehensive statistics and error reporting
   - Strict XML validation (optional)
+  - Security‑aware symlink restoration (absolute symlinks can be restricted)
 - **Pluggable classification engine**
   - Fast binary/text detection using extension whitelists and content heuristics
   - Configurable via `.repo2xml-classify.yml` – override extensions, adjust binary threshold
@@ -143,6 +144,7 @@ repo2xml restore [RESTORE OPTIONS] XML_FILE
 | `--report` | Detailed skip/error breakdown |
 | `--quiet` | Suppress non‑error output |
 | `--no-strict-validation` | Disable strict XML validation (useful for recovery) |
+| `--allow-absolute-symlinks` | Allow symlinks with absolute targets (security risk; disabled by default) |
 
 ---
 
@@ -248,16 +250,25 @@ Notable additions in schema 1.2:
   - `restore` – filesystem restorer.
   - `output` – output targets (file, stdout, clipboard, /dev/null).
   - `tokenize` – lazy‑loaded token counters with registry‑based factories.
-- **Application** – use‑case orchestrators and policies:
+- **Application** – use‑case orchestrators and a flexible pipeline of processing steps:
   - `PipelineOrchestrator` – coordinates the full export flow (scan, filter, process, write).
-  - `EntryProcessor` – handles a single file: classification, redaction, token counting, and payload building.
+  - `EntryProcessor` – a thin wrapper that delegates file processing to a `Pipeline`.
+  - `Pipeline` – executes a sequence of `Step` objects in order, with early termination support.
+  - `ProcessingContext` – shared state container passed through all steps (holds the current `FileEntry`, `ClassificationResult`, `FilePayload`, token count, and control flags).
+  - `Step` – a protocol that defines a single processing stage (e.g., classification, payload building, redaction, token counting).
+  - Concrete step implementations:
+    - `ClassifyStep` – runs the classification engine.
+    - `BuildPayloadStep` – builds the appropriate `FilePayload` (replaces the former policy chain for symlinks, modes, binaries, and text).
+    - `RedactStep` – applies secret redaction to text payloads.
+    - `TokenCountStep` – counts tokens for text payloads.
+  - `StepFactory` – creates the ordered step list based on the current configuration (enables optional steps like redaction and token counting only when enabled).
+  - `ProcessingServices` – a dependency container holding the services needed by steps.
   - `WriterCoordinator` – manages buffered writing and delegates to the serializer.
   - `StatisticsCollector` – aggregates counters, errors, and token statistics.
-  - `ExportPayloadBuilder` – applies policies for symlinks, binaries, and text.
 - **Facade** – `RepoXML` exposes a clean public API, wiring all components together.
 - **CLI** – Typer‑based command line interface with Rich progress reporting.
 
-This modular design ensures high testability, extensibility, and clear separation of concerns. Adding a new scanner backend, output format, or redaction rule requires implementing well‑defined abstract base classes without changing the core orchestration.
+This modular design ensures high testability, extensibility, and clear separation of concerns. Adding a new scanner backend, output format, redaction rule, or a custom processing step is straightforward — each requires implementing a well‑defined interface without changing the core orchestration.
 
 ---
 
@@ -270,6 +281,8 @@ patterns are active and add your own through a YAML configuration file.
 Redaction is best‑effort and should not be relied upon as the sole
 protection against credential leakage. Always review the exported context
 before sharing with third parties.
+
+The restore command includes security measures: absolute symlink targets are rejected by default (use `--allow-absolute-symlinks` to override), and all paths are validated to prevent escape from the output root.
 
 ---
 
