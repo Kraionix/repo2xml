@@ -99,7 +99,7 @@ class TestBuildPayloadStep:
         assert ctx.payload.code == SkipCode.unknown
         assert ctx.is_success is False
         assert ctx.should_stop is True
-        assert ctx.skip_code == SkipCode.unknown.value
+        assert ctx.skip_code == SkipCode.unknown
 
     def test_metadata_mode(self, entry: FileEntry) -> None:
         # In metadata mode, only ModePolicy is present in the chain.
@@ -130,7 +130,7 @@ class TestBuildPayloadStep:
         assert ctx.payload.code == ErrorCode.sniff_read_error
         assert ctx.is_success is False
         assert ctx.should_stop is True
-        assert ctx.error_code == ErrorCode.sniff_read_error.value
+        assert ctx.error_code == ErrorCode.sniff_read_error
 
     def test_binary_skip(self, entry: FileEntry, ingestor: MagicMock) -> None:
         policies: list[FilePolicy] = [
@@ -258,7 +258,7 @@ class TestBuildPayloadStep:
 
         assert ctx.should_stop is True
         assert ctx.is_success is False
-        assert ctx.error_code == "missing_classification"
+        assert ctx.error_code == ErrorCode.unknown
         assert ctx.message == "Classification result is missing"
 
     def test_missing_classification_in_metadata_mode(self, entry: FileEntry) -> None:

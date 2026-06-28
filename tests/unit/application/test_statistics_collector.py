@@ -1,4 +1,3 @@
-# tests/unit/application/test_statistics_collector.py
 """Unit tests for StatisticsCollector."""
 
 from unittest.mock import MagicMock
@@ -7,7 +6,7 @@ import pytest
 
 from repo2xml.application.statistics_collector import StatisticsCollector
 from repo2xml.contracts import StatsProvider
-from repo2xml.domain.model import TokenStats
+from repo2xml.domain.model import ErrorCode, SkipCode, TokenStats
 from repo2xml.services.scan.scanner import ScanStats
 
 
@@ -35,7 +34,7 @@ class TestStatisticsCollector:
 
     def test_record_skipped(self) -> None:
         collector = StatisticsCollector()
-        collector.record_skipped("text_size_limit", "too large")
+        collector.record_skipped(SkipCode.text_size_limit, "too large")
         stats = collector.get_export_stats()
         assert stats.files_skipped == 1
         assert stats.skipped_by_code == {"text_size_limit": 1}
@@ -43,7 +42,7 @@ class TestStatisticsCollector:
 
     def test_record_error(self) -> None:
         collector = StatisticsCollector()
-        collector.record_error("stat_error", "stat failed")
+        collector.record_error(ErrorCode.stat_error, "stat failed")
         stats = collector.get_export_stats()
         assert stats.files_errors == 1
         assert stats.errors_by_code == {"stat_error": 1}
@@ -53,9 +52,9 @@ class TestStatisticsCollector:
         collector = StatisticsCollector()
         collector.record_success()
         collector.record_success()
-        collector.record_skipped("text_size_limit")
-        collector.record_error("stat_error")
-        collector.record_error("stat_error")
+        collector.record_skipped(SkipCode.text_size_limit)
+        collector.record_error(ErrorCode.stat_error)
+        collector.record_error(ErrorCode.stat_error)
         stats = collector.get_export_stats()
         assert stats.files_emitted == 2
         assert stats.files_skipped == 1
@@ -89,7 +88,7 @@ class TestStatisticsCollector:
     def test_token_counting_with_skipped(self) -> None:
         collector = StatisticsCollector(token_counting_enabled=True)
         collector.record_success(token_count=10)
-        collector.record_skipped("size_limit")
+        collector.record_skipped(SkipCode.text_size_limit)
         stats = collector.get_export_stats()
         assert stats.token_stats.files_processed == 1
         assert stats.token_stats.total_tokens == 10
@@ -97,29 +96,24 @@ class TestStatisticsCollector:
     def test_stats_providers_are_queried(self) -> None:
         """Test that providers are queried when building stats."""
         mock_provider1 = MagicMock(spec=StatsProvider)
-        mock_provider1.get_stats.return_value = {"key1": "value1", "key2": 123}
-
         mock_provider2 = MagicMock(spec=StatsProvider)
-        mock_provider2.get_stats.return_value = {"key3": "value3"}
 
         collector = StatisticsCollector(providers=[mock_provider1, mock_provider2])
         collector.record_success()  # ensure some base stats
 
         stats = collector.get_export_stats()
 
-        # Check that providers were called
-        mock_provider1.get_stats.assert_called_once()
-        mock_provider2.get_stats.assert_called_once()
+        # Check that apply_to was called on each provider
+        mock_provider1.apply_to.assert_called_once_with(stats)
+        mock_provider2.apply_to.assert_called_once_with(stats)
 
-        # The stats from providers are assigned based on type; since these are dicts,
-        # they may not match any known type, so they won't be stored.
-        # We just check that no exception occurs.
+        # No exception, and stats is returned
         assert stats.files_emitted == 1
 
     def test_reset(self) -> None:
         collector = StatisticsCollector(token_counting_enabled=True)
         collector.record_success(token_count=100)
-        collector.record_skipped("skip")
+        collector.record_skipped(SkipCode.text_size_limit)
         collector.reset()
         stats = collector.get_export_stats()
         assert stats.files_emitted == 0
