@@ -19,6 +19,7 @@ class TestRestorePipeline:
             restore_mtime=True,
             create_empty_for_missing=False,
             strict_validation=True,
+            allow_absolute_symlinks=False,
         )
 
     @patch("repo2xml.application.restore_pipeline.get_format_factory")
@@ -49,13 +50,14 @@ class TestRestorePipeline:
 
             # Check deserializer called with correct strict flag
             mock_deserializer.parse.assert_called_once_with(stream, strict=True)
-            # Check restorer created with correct params
+            # Check restorer created with correct params including allow_absolute_symlinks
             mock_restorer_cls.assert_called_once_with(
                 output_root,
                 overwrite=False,
                 skip_existing=True,  # not overwrite
                 restore_mtime=True,
                 create_empty_for_missing=False,
+                allow_absolute_symlinks=False,
             )
             # Check restorer called with files
             mock_restorer.restore.assert_called_once_with(mock_repo.files)
@@ -68,7 +70,7 @@ class TestRestorePipeline:
 
     @patch("repo2xml.application.restore_pipeline.get_format_factory")
     def test_execute_with_overwrite(self, mock_get_factory):
-        config = RestoreConfig(overwrite=True, strict_validation=False)
+        config = RestoreConfig(overwrite=True, strict_validation=False, allow_absolute_symlinks=True)
         mock_deserializer = MagicMock()
         mock_factory = MagicMock()
         mock_factory.create_deserializer.return_value = mock_deserializer
@@ -86,18 +88,19 @@ class TestRestorePipeline:
 
             # Check strict_validation=False
             mock_deserializer.parse.assert_called_once_with(stream, strict=False)
-            # Check restorer created with overwrite=True, skip_existing=False
+            # Check restorer created with overwrite=True, skip_existing=False, and allow_absolute_symlinks=True
             mock_restorer_cls.assert_called_once_with(
                 output_root,
                 overwrite=True,
                 skip_existing=False,
                 restore_mtime=True,
                 create_empty_for_missing=False,
+                allow_absolute_symlinks=True,
             )
 
     @patch("repo2xml.application.restore_pipeline.get_format_factory")
     def test_execute_with_create_empty(self, mock_get_factory):
-        config = RestoreConfig(create_empty_for_missing=True)
+        config = RestoreConfig(create_empty_for_missing=True, allow_absolute_symlinks=False)
         mock_deserializer = MagicMock()
         mock_factory = MagicMock()
         mock_factory.create_deserializer.return_value = mock_deserializer
@@ -119,4 +122,5 @@ class TestRestorePipeline:
                 skip_existing=True,
                 restore_mtime=True,
                 create_empty_for_missing=True,
+                allow_absolute_symlinks=False,
             )

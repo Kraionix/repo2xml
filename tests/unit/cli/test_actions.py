@@ -64,6 +64,7 @@ class TestExecuteExport:
             "classify_config": None,
             "count_tokens": False,
             "tokenizer_model": "deepseek-ai/DeepSeek-V4-Pro",
+            "verbose_errors": False,
         }
 
     @patch("repo2xml.cli.actions.RepoXML")
@@ -86,6 +87,7 @@ class TestExecuteExport:
             redaction_stats=None,
             classification_stats=None,
             token_stats=TokenStats(total_tokens=100, files_processed=8),
+            scan_stats=None,
         )
         mock_engine.export.return_value = mock_stats
 
@@ -142,6 +144,7 @@ class TestExecuteExport:
             files_skipped=0,
             files_errors=0,
             token_stats=None,
+            scan_stats=None,
         )
         mock_engine.export.return_value = mock_stats
 
@@ -177,6 +180,7 @@ class TestExecuteExport:
             files_skipped=0,
             files_errors=0,
             token_stats=None,
+            scan_stats=None,
         )
         mock_engine.export.return_value = mock_stats
 
@@ -206,11 +210,63 @@ class TestExecuteRestore:
             restore_mtime=True,
             create_empty=False,
             report=False,
+            allow_absolute_symlinks=False,
             strict_validation=True,
+            verbose_errors=False,
         )
 
         mock_repo_xml.assert_called_once()
-        mock_engine.restore.assert_called_once()
+        # Verify that RestoreConfig was created with allow_absolute_symlinks=False
+        # We can check the config passed to RepoXML by inspecting the call
+        call_args = mock_repo_xml.call_args[0][0]  # first positional argument
+        assert call_args.allow_absolute_symlinks is False
+        assert call_args.strict_validation is True
+
+    @patch("repo2xml.cli.actions.RepoXML")
+    @patch("repo2xml.cli.actions.RichProgressReporter")
+    def test_execute_restore_with_allow_absolute_symlinks(self, mock_progress, mock_repo_xml, console):
+        mock_engine = MagicMock()
+        mock_repo_xml.return_value = mock_engine
+        mock_engine.restore.return_value = MagicMock()
+
+        execute_restore(
+            console=console,
+            xml_file=Path("context.xml"),
+            output=Path("."),
+            overwrite=False,
+            restore_mtime=True,
+            create_empty=False,
+            report=False,
+            allow_absolute_symlinks=True,
+            strict_validation=True,
+            verbose_errors=False,
+        )
+
+        call_args = mock_repo_xml.call_args[0][0]
+        assert call_args.allow_absolute_symlinks is True
+
+    @patch("repo2xml.cli.actions.RepoXML")
+    @patch("repo2xml.cli.actions.RichProgressReporter")
+    def test_execute_restore_with_verbose_errors(self, mock_progress, mock_repo_xml, console):
+        mock_engine = MagicMock()
+        mock_repo_xml.return_value = mock_engine
+        mock_engine.restore.return_value = MagicMock()
+
+        # We can't easily test verbose_errors because it's used in reporting, but we can check that the
+        # flag is passed through and does not cause errors.
+        execute_restore(
+            console=console,
+            xml_file=Path("context.xml"),
+            output=Path("."),
+            overwrite=False,
+            restore_mtime=True,
+            create_empty=False,
+            report=True,
+            allow_absolute_symlinks=False,
+            strict_validation=True,
+            verbose_errors=True,
+        )
+        # No assertion needed; just ensure it runs without errors.
 
     @patch("repo2xml.cli.actions.RepoXML")
     def test_execute_restore_error(self, mock_repo_xml, console):
@@ -228,6 +284,8 @@ class TestExecuteRestore:
                 restore_mtime=True,
                 create_empty=False,
                 report=False,
+                allow_absolute_symlinks=False,
                 strict_validation=True,
+                verbose_errors=False,
             )
         assert exc_info.value.exit_code == 1

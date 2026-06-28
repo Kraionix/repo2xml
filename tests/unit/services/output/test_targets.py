@@ -2,7 +2,6 @@
 """Unit tests for output targets and compression."""
 
 import gzip
-import io
 import os
 import sys
 from pathlib import Path
@@ -25,31 +24,34 @@ class TestOpenOutputStream:
     def test_stdout_no_compress(self, monkeypatch) -> None:
         mock_buffer = MagicMock()
         monkeypatch.setattr(sys, "stdout", MagicMock(buffer=mock_buffer))
-        stream, closer = open_output_stream(
+        with open_output_stream(
             output_path=Path("out"), use_stdout=True, compress=CompressMode.none
-        )
-        assert stream is mock_buffer
-        closer()  # no-op
+        ) as stream:
+            assert stream is mock_buffer
+            stream.write(b"hello")
+        mock_buffer.write.assert_called_once_with(b"hello")
 
     def test_stdout_gzip(self, monkeypatch) -> None:
         mock_buffer = MagicMock()
         monkeypatch.setattr(sys, "stdout", MagicMock(buffer=mock_buffer))
         with patch("gzip.GzipFile") as mock_gzip:
             mock_gzip.return_value = MagicMock()
-            stream, closer = open_output_stream(
+            with open_output_stream(
                 output_path=Path("out"), use_stdout=True, compress=CompressMode.gzip
-            )
+            ) as stream:
+                stream.write(b"test")
             mock_gzip.assert_called_once_with(fileobj=mock_buffer, mode="wb")
-            closer()
+            mock_gzip.return_value.write.assert_called_once_with(b"test")
 
     def test_stdout_zstd_missing_dependency(self, monkeypatch) -> None:
         mock_buffer = MagicMock()
         monkeypatch.setattr(sys, "stdout", MagicMock(buffer=mock_buffer))
         with patch("builtins.__import__", side_effect=ImportError("no zstd")):
             with pytest.raises(OutputError, match="zstd compression requires"):
-                open_output_stream(
+                with open_output_stream(
                     output_path=Path("out"), use_stdout=True, compress=CompressMode.zstd
-                )
+                ):
+                    pass  # Should raise before entering body
 
     def test_stdout_zstd(self, monkeypatch) -> None:
         mock_buffer = MagicMock()
@@ -57,28 +59,27 @@ class TestOpenOutputStream:
         mock_zstd = MagicMock()
         mock_zstd.ZstdCompressor.return_value.stream_writer.return_value = MagicMock()
         with patch.dict("sys.modules", {"zstandard": mock_zstd}):
-            stream, closer = open_output_stream(
+            with open_output_stream(
                 output_path=Path("out"), use_stdout=True, compress=CompressMode.zstd
-            )
-            closer()
+            ) as stream:
+                stream.write(b"test")
+            mock_zstd.ZstdCompressor.assert_called_once_with(level=3)
+            mock_zstd.ZstdCompressor.return_value.stream_writer.assert_called_once_with(mock_buffer)
 
     def test_file_no_compress(self, tmp_path: Path) -> None:
         out_path = tmp_path / "out.txt"
-        stream, closer = open_output_stream(
+        with open_output_stream(
             output_path=out_path, use_stdout=False, compress=CompressMode.none
-        )
-        assert stream is not None
-        stream.write(b"test")
-        closer()
+        ) as stream:
+            stream.write(b"test")
         assert out_path.read_bytes() == b"test"
 
     def test_file_gzip(self, tmp_path: Path) -> None:
         out_path = tmp_path / "out.gz"
-        stream, closer = open_output_stream(
+        with open_output_stream(
             output_path=out_path, use_stdout=False, compress=CompressMode.gzip
-        )
-        stream.write(b"test")
-        closer()
+        ) as stream:
+            stream.write(b"test")
         with gzip.open(out_path, "rb") as f:
             assert f.read() == b"test"
 
@@ -86,28 +87,30 @@ class TestOpenOutputStream:
         out_path = tmp_path / "out.zst"
         with patch("builtins.__import__", side_effect=ImportError("no zstd")):
             with pytest.raises(OutputError, match="zstd compression requires"):
-                open_output_stream(
+                with open_output_stream(
                     output_path=out_path, use_stdout=False, compress=CompressMode.zstd
-                )
+                ):
+                    pass
 
     def test_file_zstd(self, tmp_path: Path) -> None:
         out_path = tmp_path / "out.zst"
         mock_zstd = MagicMock()
         mock_zstd.ZstdCompressor.return_value.stream_writer.return_value = MagicMock()
         with patch.dict("sys.modules", {"zstandard": mock_zstd}):
-            stream, closer = open_output_stream(
+            with open_output_stream(
                 output_path=out_path, use_stdout=False, compress=CompressMode.zstd
-            )
-            stream.write(b"test")
-            closer()
+            ) as stream:
+                stream.write(b"test")
+            mock_zstd.ZstdCompressor.assert_called_once_with(level=3)
 
     def test_file_parent_mkdir(self, tmp_path: Path) -> None:
         out_path = tmp_path / "sub" / "out.txt"
-        stream, closer = open_output_stream(
+        with open_output_stream(
             output_path=out_path, use_stdout=False, compress=CompressMode.none
-        )
-        closer()
+        ) as stream:
+            stream.write(b"data")
         assert out_path.parent.exists()
+        assert out_path.read_bytes() == b"data"
 
 
 class TestFileTarget:

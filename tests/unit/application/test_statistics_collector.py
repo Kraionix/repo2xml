@@ -5,6 +5,7 @@ import pytest
 
 from repo2xml.application.statistics_collector import StatisticsCollector
 from repo2xml.domain.model import TokenStats
+from repo2xml.services.scan.scanner import ScanStats
 
 
 class TestStatisticsCollector:
@@ -18,6 +19,7 @@ class TestStatisticsCollector:
         assert stats.skipped_by_code == {}
         assert stats.errors_by_code == {}
         assert stats.token_stats is None
+        assert stats.scan_stats is None
 
     def test_record_success(self) -> None:
         collector = StatisticsCollector()
@@ -104,6 +106,13 @@ class TestStatisticsCollector:
         stats = collector.get_export_stats()
         assert stats.classification_stats is mock_stats
 
+    def test_set_scan_stats(self) -> None:
+        collector = StatisticsCollector()
+        scan_stats = ScanStats()
+        collector.set_scan_stats(scan_stats)
+        stats = collector.get_export_stats()
+        assert stats.scan_stats is scan_stats
+
     def test_scan_warning_summary(self) -> None:
         collector = StatisticsCollector()
         stats = collector.get_export_stats("some scan warnings")
@@ -113,6 +122,7 @@ class TestStatisticsCollector:
         collector = StatisticsCollector(token_counting_enabled=True)
         collector.record_success(token_count=100)
         collector.record_skipped("skip")
+        collector.set_scan_stats(ScanStats())
         collector.reset()
         stats = collector.get_export_stats()
         assert stats.files_emitted == 0
@@ -122,3 +132,4 @@ class TestStatisticsCollector:
         assert stats.errors_by_code == {}
         assert stats.token_stats.total_tokens == 0
         assert stats.token_stats.files_processed == 0
+        assert stats.scan_stats is None

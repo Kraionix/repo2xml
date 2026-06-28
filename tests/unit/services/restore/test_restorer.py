@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from repo2xml.domain.exceptions import RestoreError, RestoreSecurityError
 from repo2xml.domain.model import (
     BinaryBase64Payload,
     ErrorCode,
@@ -36,6 +37,7 @@ class TestFilesystemRestorer:
             skip_existing=True,
             restore_mtime=True,
             create_empty_for_missing=False,
+            allow_absolute_symlinks=False,
         )
 
     def _make_entry(self, rel_path: str, is_symlink: bool = False) -> FileEntry:
@@ -90,6 +92,7 @@ class TestFilesystemRestorer:
             skip_existing=True,
             restore_mtime=True,
             create_empty_for_missing=True,
+            allow_absolute_symlinks=False,
         )
         entry = self._make_entry("empty.txt")
         payload = MetadataPayload()
@@ -123,7 +126,7 @@ class TestFilesystemRestorer:
         restore_entry = RestoreEntry(entry=entry, payload=payload)
         stats = restorer.restore(iter([restore_entry]))
         assert stats.files_skipped == 1
-        # ErrorPayload's code is "stat_error", not "unknown"
+        # ErrorPayload's code is "stat_error"
         assert stats.skipped_by_code.get("stat_error", 0) == 1
         assert not (output_root / "error.txt").exists()
 
@@ -140,6 +143,7 @@ class TestFilesystemRestorer:
             skip_existing=True,
             restore_mtime=True,
             create_empty_for_missing=False,
+            allow_absolute_symlinks=False,
         )
         entry = self._make_entry("file.txt")
         payload = TextPayload(text="new content", encoding="utf-8")
@@ -158,6 +162,7 @@ class TestFilesystemRestorer:
             skip_existing=False,
             restore_mtime=True,
             create_empty_for_missing=False,
+            allow_absolute_symlinks=False,
         )
         stats2 = restorer_overwrite.restore(iter([restore_entry]))
         assert stats2.files_created == 1
@@ -172,7 +177,7 @@ class TestFilesystemRestorer:
         # We check that the error appears in statistics.
         stats = restorer.restore(iter([restore_entry]))
         assert stats.files_errors == 1
-        assert "RestoreError" in stats.errors_by_code
+        assert "RestoreSecurityError" in stats.errors_by_code
         # File should not be created
         assert not (output_root / "escape.txt").exists()
 
@@ -191,6 +196,7 @@ class TestFilesystemRestorer:
             skip_existing=True,
             restore_mtime=False,
             create_empty_for_missing=False,
+            allow_absolute_symlinks=False,
         )
         entry = self._make_entry("file.txt")
         payload = TextPayload(text="hello", encoding="utf-8")
@@ -198,3 +204,99 @@ class TestFilesystemRestorer:
         stats = restorer_no_mtime.restore(iter([restore_entry]))
         assert stats.files_created == 1
         assert (output_root / "file.txt").exists()
+
+    # ---- New tests for security features ----
+
+    def test_validate_output_root_creates_directory(self, tmp_path: Path) -> None:
+        output_root = tmp_path / "new_dir"
+        restorer = FilesystemRestorer(
+            output_root=output_root,
+            overwrite=False,
+            skip_existing=True,
+            restore_mtime=True,
+            create_empty_for_missing=False,
+            allow_absolute_symlinks=False,
+        )
+        assert output_root.exists()
+        assert output_root.is_dir()
+
+    def test_validate_output_root_raises_if_path_is_file(self, tmp_path: Path) -> None:
+        file_path = tmp_path / "file.txt"
+        file_path.write_text("data")
+        with pytest.raises(RestoreError, match="exists but is not a directory"):
+            FilesystemRestorer(
+                output_root=file_path,
+                overwrite=False,
+                skip_existing=True,
+                restore_mtime=True,
+                create_empty_for_missing=False,
+                allow_absolute_symlinks=False,
+            )
+
+    def test_resolve_symlink_target_absolute_allowed(self, output_root: Path) -> None:
+        restorer = FilesystemRestorer(
+            output_root=output_root,
+            allow_absolute_symlinks=True,
+        )
+        # Create a link path inside root
+        link_path = output_root / "link"
+        # Absolute target inside root
+        target = str(output_root / "inside")
+        resolved = restorer._resolve_symlink_target(link_path, target)
+        assert resolved == target
+
+        # Absolute target outside root - should still be allowed because allow_absolute_symlinks=True
+        target_outside = "/etc/passwd"
+        resolved = restorer._resolve_symlink_target(link_path, target_outside)
+        assert resolved == target_outside
+
+    def test_resolve_symlink_target_absolute_disallowed(self, output_root: Path) -> None:
+        restorer = FilesystemRestorer(
+            output_root=output_root,
+            allow_absolute_symlinks=False,
+        )
+        link_path = output_root / "link"
+        # Absolute target inside root - allowed
+        inside = str(output_root / "inside")
+        resolved = restorer._resolve_symlink_target(link_path, inside)
+        assert resolved == inside
+
+        # Absolute target outside root - should raise
+        outside = "/etc/passwd"
+        with pytest.raises(RestoreSecurityError, match="Absolute symlink target points outside output root"):
+            restorer._resolve_symlink_target(link_path, outside)
+
+    def test_resolve_symlink_target_relative_inside(self, output_root: Path) -> None:
+        restorer = FilesystemRestorer(
+            output_root=output_root,
+            allow_absolute_symlinks=False,
+        )
+        link_path = output_root / "sub" / "link"
+        # Relative target inside root
+        target = "../file.txt"  # points to output_root/file.txt
+        resolved = restorer._resolve_symlink_target(link_path, target)
+        # Should return a relative path
+        assert resolved == "../file.txt" or resolved == str(output_root / "file.txt")
+
+    def test_resolve_symlink_target_relative_outside(self, output_root: Path) -> None:
+        restorer = FilesystemRestorer(
+            output_root=output_root,
+            allow_absolute_symlinks=False,
+        )
+        link_path = output_root / "sub" / "link"
+        # Relative target that escapes root
+        target = "../../outside"
+        with pytest.raises(RestoreSecurityError, match="Relative symlink target escapes output root"):
+            restorer._resolve_symlink_target(link_path, target)
+
+    def test_create_symlink_security_check(self, output_root: Path, restorer: FilesystemRestorer) -> None:
+        if os.name == "nt":
+            pytest.skip("Symlink creation requires admin privileges on Windows")
+        # Create a symlink that points outside root (should be blocked)
+        entry = self._make_entry("unsafe_link", is_symlink=True)
+        payload = LinkPayload(link_target="/etc/passwd")
+        restore_entry = RestoreEntry(entry=entry, payload=payload)
+        stats = restorer.restore(iter([restore_entry]))
+        assert stats.files_errors == 1
+        assert "RestoreSecurityError" in stats.errors_by_code
+        assert not (output_root / "unsafe_link").exists()

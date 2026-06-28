@@ -2,7 +2,7 @@
 """Unit tests for RepoXML facade (using mocks for all dependencies)."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -20,7 +20,7 @@ from repo2xml.config import (
     TokenCountConfig,
 )
 from repo2xml.domain.exceptions import ConfigurationError, FacadeError
-from repo2xml.facade import RepoXML
+from repo2xml.facade import RepoXML, StreamTarget
 
 
 class TestRepoXMLFacade:
@@ -41,43 +41,39 @@ class TestRepoXMLFacade:
 
     @pytest.fixture
     def restore_config(self) -> RestoreConfig:
-        return RestoreConfig(overwrite=False, restore_mtime=True, create_empty_for_missing=False)
+        return RestoreConfig(
+            overwrite=False,
+            restore_mtime=True,
+            create_empty_for_missing=False,
+            allow_absolute_symlinks=False,
+        )
 
-    @patch("repo2xml.facade.create_scanner")
-    @patch("repo2xml.facade.PipelineOrchestrator")
-    @patch("repo2xml.facade.WriterCoordinator")
-    @patch("repo2xml.facade.StatisticsCollector")
-    @patch("repo2xml.facade.EntryProcessor")
-    @patch("repo2xml.facade.ClassificationEngine")
-    @patch("repo2xml.facade.StandardIngestor")
-    @patch("repo2xml.facade.GitignoreEngine")
-    def test_export_calls_orchestrator(
-        self,
-        mock_gitignore,
-        mock_ingestor,
-        mock_classify,
-        mock_entry_processor,
-        mock_stats_collector,
-        mock_writer_coordinator,
-        mock_orchestrator_cls,
-        mock_create_scanner,
-        export_config,
-        tmp_path,
-    ):
-        """Test that export() builds components and calls orchestrator.execute()."""
-        mock_scanner = MagicMock()
-        mock_create_scanner.return_value = mock_scanner
+    @patch("repo2xml.facade.ExportComponentFactory")
+    def test_export_calls_orchestrator(self, MockComponentFactory, export_config, tmp_path):
+        """Test that export() uses the component factory and calls orchestrator.execute()."""
+        # Create mocks for factory, orchestrator and collector
+        mock_factory = MagicMock()
+        MockComponentFactory.return_value = mock_factory
+
         mock_orchestrator = MagicMock()
-        mock_orchestrator_cls.return_value = mock_orchestrator
-        mock_writer = MagicMock()
-        mock_writer_coordinator.return_value = mock_writer
+        mock_collector = MagicMock()
+        mock_factory.build.return_value = (mock_orchestrator, mock_collector)
 
         facade = RepoXML(export_config)
         out_stream = MagicMock()
         stats = facade.export(tmp_path, out_stream)
 
-        mock_create_scanner.assert_called_once()
-        mock_orchestrator_cls.assert_called_once()
+        # Check factory was created with correct args
+        # The third argument is a StreamTarget wrapping out_stream, so we use ANY
+        MockComponentFactory.assert_called_once_with(
+            export_config,
+            tmp_path,
+            ANY,  # StreamTarget instance
+            None,  # progress default
+        )
+        # Check build was called
+        mock_factory.build.assert_called_once()
+        # Check orchestrator.execute was called
         mock_orchestrator.execute.assert_called_once_with(stats_only=False)
 
     @patch("repo2xml.facade.create_scanner")
