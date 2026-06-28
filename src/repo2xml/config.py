@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from repo2xml.domain.exceptions import ConfigurationError
@@ -48,45 +49,25 @@ class RootPathMode(str, Enum):
     redact = "redact"
 
 
+# ----------------------------------------------------------------------
+# Sub-configs (logical groups)
+# ----------------------------------------------------------------------
+
 @dataclass(slots=True)
-class ExportConfig:
-    format: str = "xml"
-    mode: Mode = Mode.full
-    formatting: Formatting = Formatting.compact
-    binary: BinaryMode = BinaryMode.skip
-    newline: NewlineMode = NewlineMode.preserve
-    decode_errors: DecodeErrors = DecodeErrors.replace
-    include_timestamp: bool = True
-    root_path_mode: RootPathMode = RootPathMode.absolute
-    include_mtime: bool = True
-    include_size: bool = True
+class ScanConfig:
+    """Configuration for filesystem scanning and .gitignore handling."""
     use_gitignore: bool = True
     ignore_patterns: List[str] = field(default_factory=list)
     include_patterns: List[str] = field(default_factory=list)
     hard_exclude_dirs: List[str] = field(default_factory=lambda: [".git"])
     follow_symlinks_dirs: bool = False
     symlinks_files: SymlinkFilesMode = SymlinkFilesMode.follow
-    max_text_size: int = 100_000
-    max_base64_size: int = 100_000
-    max_hash_size: int = 0
-    write_buffer_chars: int = 64_000
-    report: bool = False
-    min_file_size: int = 0
-    max_file_size: int = 0
-    newer_than: Optional[float] = None
-    older_than: Optional[float] = None
     source: str = "filesystem"
     source_options: Dict[str, Any] = field(default_factory=dict)
-    redact: bool = False
-    redact_config_path: Optional[Path] = None
-    classify_config_path: Optional[Path] = None   # Optional user YAML for classification
-    # Token counting
-    count_tokens: bool = False
-    tokenizer_model: str = "deepseek-ai/DeepSeek-V4-Pro"
 
     def normalize(self) -> None:
-        self.format = (self.format or "xml").strip().lower()
         self.source = self.source.strip().lower()
+        # Deduplicate hard_exclude_dirs
         seen: set[str] = set()
         deduped: list[str] = []
         for d in self.hard_exclude_dirs:
@@ -96,31 +77,100 @@ class ExportConfig:
         self.hard_exclude_dirs = deduped
 
     def validate(self) -> None:
-        if self.max_text_size < 0:
-            raise ConfigurationError("max_text_size must be >= 0")
-        if self.max_base64_size < 0:
-            raise ConfigurationError("max_base64_size must be >= 0")
-        if self.max_hash_size < 0:
-            raise ConfigurationError("max_hash_size must be >= 0")
-        if self.write_buffer_chars < 0:
-            raise ConfigurationError("write_buffer_chars must be >= 0")
+        if not self.source:
+            raise ConfigurationError("source must not be empty")
+        for pat in self.include_patterns:
+            if pat.startswith("!"):
+                raise ConfigurationError(f"Include pattern '{pat}' must not start with '!'.")
+
+
+@dataclass(slots=True)
+class FilterConfig:
+    """File size and modification time filters."""
+    min_file_size: int = 0
+    max_file_size: int = 0
+    newer_than: Optional[float] = None
+    older_than: Optional[float] = None
+
+    def validate(self) -> None:
         if self.min_file_size < 0:
             raise ConfigurationError("min_file_size must be >= 0")
         if self.max_file_size < 0:
             raise ConfigurationError("max_file_size must be >= 0")
         if self.min_file_size > 0 and self.max_file_size > 0 and self.min_file_size > self.max_file_size:
             raise ConfigurationError("min_file_size must be <= max_file_size")
-        if not self.format:
-            raise ConfigurationError("format must not be empty")
-        for pat in self.include_patterns:
-            if pat.startswith("!"):
-                raise ConfigurationError(f"Include pattern '{pat}' must not start with '!'.")
-        if not self.source:
-            raise ConfigurationError("source must not be empty")
-        if self.classify_config_path is not None and not self.classify_config_path.is_file():
-            raise ConfigurationError(f"Classify config file does not exist: {self.classify_config_path}")
-        # Token counting dependency check
-        if self.count_tokens:
+
+
+@dataclass(slots=True)
+class OutputFormatConfig:
+    """Output formatting and metadata emission."""
+    formatting: Formatting = Formatting.compact
+    include_timestamp: bool = True
+    include_mtime: bool = True
+    include_size: bool = True
+    root_path_mode: RootPathMode = RootPathMode.absolute
+    write_buffer_chars: int = 64_000
+
+    def validate(self) -> None:
+        if self.write_buffer_chars < 0:
+            raise ConfigurationError("write_buffer_chars must be >= 0")
+
+
+@dataclass(slots=True)
+class BinaryHandlingConfig:
+    """How to handle binary files."""
+    mode: BinaryMode = BinaryMode.skip
+    max_base64_size: int = 100_000
+    max_hash_size: int = 0   # 0 means no limit (hash always computed)
+
+    def validate(self) -> None:
+        if self.max_base64_size < 0:
+            raise ConfigurationError("max_base64_size must be >= 0")
+        if self.max_hash_size < 0:
+            raise ConfigurationError("max_hash_size must be >= 0")
+
+
+@dataclass(slots=True)
+class TextHandlingConfig:
+    """Text file reading and decoding."""
+    max_text_size: int = 100_000
+    newline: NewlineMode = NewlineMode.preserve
+    decode_errors: DecodeErrors = DecodeErrors.replace
+
+    def validate(self) -> None:
+        if self.max_text_size < 0:
+            raise ConfigurationError("max_text_size must be >= 0")
+
+
+@dataclass(slots=True)
+class RedactConfig:
+    """Secret redaction settings."""
+    enabled: bool = False
+    config_path: Optional[Path] = None
+
+    def validate(self) -> None:
+        if self.config_path is not None and not self.config_path.is_file():
+            raise ConfigurationError(f"Redact config file does not exist: {self.config_path}")
+
+
+@dataclass(slots=True)
+class ClassifyConfig:
+    """Classification rules (text vs binary)."""
+    config_path: Optional[Path] = None
+
+    def validate(self) -> None:
+        if self.config_path is not None and not self.config_path.is_file():
+            raise ConfigurationError(f"Classify config file does not exist: {self.config_path}")
+
+
+@dataclass(slots=True)
+class TokenCountConfig:
+    """Token counting settings (Hugging Face)."""
+    enabled: bool = False
+    model: str = "deepseek-ai/DeepSeek-V4-Pro"
+
+    def validate(self) -> None:
+        if self.enabled:
             try:
                 import transformers  # noqa: F401
             except ImportError:
@@ -129,6 +179,45 @@ class ExportConfig:
                     "Install with: pip install repo2xml[tokens]"
                 )
 
+
+# ----------------------------------------------------------------------
+# Main ExportConfig – aggregates all sub-configs
+# ----------------------------------------------------------------------
+
+@dataclass(slots=True)
+class ExportConfig:
+    """Complete export configuration."""
+    mode: Mode = Mode.full
+    format: str = "xml"
+    scan: ScanConfig = field(default_factory=ScanConfig)
+    filter: FilterConfig = field(default_factory=FilterConfig)
+    output: OutputFormatConfig = field(default_factory=OutputFormatConfig)
+    binary: BinaryHandlingConfig = field(default_factory=BinaryHandlingConfig)
+    text: TextHandlingConfig = field(default_factory=TextHandlingConfig)
+    redact: RedactConfig = field(default_factory=RedactConfig)
+    classify: ClassifyConfig = field(default_factory=ClassifyConfig)
+    token: TokenCountConfig = field(default_factory=TokenCountConfig)
+
+    def normalize(self) -> None:
+        self.format = (self.format or "xml").strip().lower()
+        self.scan.normalize()
+
+    def validate(self) -> None:
+        if not self.format:
+            raise ConfigurationError("format must not be empty")
+        self.scan.validate()
+        self.filter.validate()
+        self.output.validate()
+        self.binary.validate()
+        self.text.validate()
+        self.redact.validate()
+        self.classify.validate()
+        self.token.validate()
+
+
+# ----------------------------------------------------------------------
+# RestoreConfig (unchanged)
+# ----------------------------------------------------------------------
 
 @dataclass(slots=True)
 class RestoreConfig:

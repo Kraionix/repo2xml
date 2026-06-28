@@ -5,7 +5,14 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from repo2xml.application.contracts import IngestorLike
-from repo2xml.config import BinaryMode, ExportConfig, Mode, SymlinkFilesMode
+from repo2xml.config import (
+    BinaryHandlingConfig,
+    BinaryMode,
+    ExportConfig,
+    Mode,
+    SymlinkFilesMode,
+    TextHandlingConfig,
+)
 from repo2xml.domain.model import (
     BinaryBase64Payload,
     BinaryHashPayload,
@@ -74,12 +81,12 @@ class ReasonFormatter:
 
 @dataclass(slots=True)
 class SymlinkPolicy:
-    config: ExportConfig
+    symlinks_files: SymlinkFilesMode
 
     def apply(self, entry: FileEntry) -> Optional[FilePayload]:
-        if entry.is_symlink and self.config.symlinks_files == SymlinkFilesMode.as_link:
+        if entry.is_symlink and self.symlinks_files == SymlinkFilesMode.as_link:
             return LinkPayload(link_target=entry.symlink_target)
-        if entry.is_symlink and self.config.symlinks_files == SymlinkFilesMode.skip:
+        if entry.is_symlink and self.symlinks_files == SymlinkFilesMode.skip:
             info = SkipInfo(code=SkipCode.unknown, detail={"reason": "symlink_files_mode=skip"})
             return SkippedPayload(code=info.code, message=ReasonFormatter.format_skip(info), detail=info.detail)
         return None
@@ -87,27 +94,27 @@ class SymlinkPolicy:
 
 @dataclass(slots=True)
 class ModePolicy:
-    config: ExportConfig
+    mode: Mode
 
     def apply(self, entry: FileEntry) -> Optional[FilePayload]:
-        if self.config.mode == Mode.metadata:
+        if self.mode == Mode.metadata:
             return MetadataPayload()
         return None
 
 
 @dataclass(slots=True)
 class BinaryPolicy:
-    config: ExportConfig
+    binary: BinaryHandlingConfig
     ingestor: IngestorLike
 
     def apply(self, entry: FileEntry) -> FilePayload:
-        if self.config.binary == BinaryMode.skip:
+        if self.binary.mode == BinaryMode.skip:
             info = SkipInfo(code=SkipCode.binary_skip_mode)
             return SkippedPayload(code=info.code, message=ReasonFormatter.format_skip(info), detail=info.detail)
-        if self.config.binary == BinaryMode.hash:
-            if self.config.max_hash_size > 0 and entry.size > self.config.max_hash_size:
+        if self.binary.mode == BinaryMode.hash:
+            if self.binary.max_hash_size > 0 and entry.size > self.binary.max_hash_size:
                 info = SkipInfo(code=SkipCode.hash_size_limit,
-                                detail={"size": entry.size, "limit": self.config.max_hash_size})
+                                detail={"size": entry.size, "limit": self.binary.max_hash_size})
                 return SkippedPayload(code=info.code, message=ReasonFormatter.format_skip(info), detail=info.detail)
             try:
                 h = self.ingestor.sha256_file(entry.abs_path)
@@ -115,10 +122,10 @@ class BinaryPolicy:
                 err = ErrorInfo(code=ErrorCode.binary_hash_error, detail={"os_error": str(e)})
                 return ErrorPayload(code=err.code, message=ReasonFormatter.format_error(err), detail=err.detail)
             return BinaryHashPayload(sha256_hex=h)
-        if self.config.binary == BinaryMode.base64:
-            if entry.size > self.config.max_base64_size:
+        if self.binary.mode == BinaryMode.base64:
+            if entry.size > self.binary.max_base64_size:
                 info = SkipInfo(code=SkipCode.base64_size_limit,
-                                detail={"size": entry.size, "limit": self.config.max_base64_size})
+                                detail={"size": entry.size, "limit": self.binary.max_base64_size})
                 return SkippedPayload(code=info.code, message=ReasonFormatter.format_skip(info), detail=info.detail)
             try:
                 chunks = self.ingestor.iter_base64_chunks(entry.abs_path)
@@ -126,23 +133,23 @@ class BinaryPolicy:
                 err = ErrorInfo(code=ErrorCode.base64_error, detail={"os_error": str(e)})
                 return ErrorPayload(code=err.code, message=ReasonFormatter.format_error(err), detail=err.detail)
             return BinaryBase64Payload(chunks=chunks)
-        info = SkipInfo(code=SkipCode.unknown, detail={"binary_mode": str(self.config.binary)})
+        info = SkipInfo(code=SkipCode.unknown, detail={"binary_mode": str(self.binary.mode)})
         return SkippedPayload(code=info.code, message=ReasonFormatter.format_skip(info), detail=info.detail)
 
 
 @dataclass(slots=True)
 class TextPolicy:
-    config: ExportConfig
+    text: TextHandlingConfig
     ingestor: IngestorLike
 
     def apply(self, entry: FileEntry, classification: ClassificationResult) -> FilePayload:
-        if entry.size > self.config.max_text_size:
+        if entry.size > self.text.max_text_size:
             info = SkipInfo(code=SkipCode.text_size_limit,
-                            detail={"size": entry.size, "limit": self.config.max_text_size})
+                            detail={"size": entry.size, "limit": self.text.max_text_size})
             return SkippedPayload(code=info.code, message=ReasonFormatter.format_skip(info), detail=info.detail)
         res = self.ingestor.read_text(
             entry.abs_path,
-            max_size=self.config.max_text_size,
+            max_size=self.text.max_text_size,
             sniff_sample=classification.sample,
         )
         if res.kind == "error":
@@ -157,7 +164,10 @@ class TextPolicy:
 
 @dataclass(slots=True)
 class ExportPayloadBuilder:
-    config: ExportConfig
+    mode: Mode
+    binary: BinaryHandlingConfig
+    text: TextHandlingConfig
+    symlinks_files: SymlinkFilesMode
     ingestor: IngestorLike
     _symlink: SymlinkPolicy = field(init=False, repr=False)
     _mode: ModePolicy = field(init=False, repr=False)
@@ -165,10 +175,10 @@ class ExportPayloadBuilder:
     _text: TextPolicy = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self._symlink = SymlinkPolicy(self.config)
-        self._mode = ModePolicy(self.config)
-        self._binary = BinaryPolicy(self.config, self.ingestor)
-        self._text = TextPolicy(self.config, self.ingestor)
+        self._symlink = SymlinkPolicy(self.symlinks_files)
+        self._mode = ModePolicy(self.mode)
+        self._binary = BinaryPolicy(self.binary, self.ingestor)
+        self._text = TextPolicy(self.text, self.ingestor)
 
     def build(self, entry: FileEntry, classification: ClassificationResult) -> FilePayload:
         p = self._symlink.apply(entry)

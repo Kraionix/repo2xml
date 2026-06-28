@@ -84,7 +84,6 @@ class RepoXML:
         # 3. Run the pipeline
         # ------------------------------------------------------------------
         try:
-            # Передаём stats_only в оркестратор
             stats = orchestrator.execute(stats_only=stats_only)
         except KeyboardInterrupt:
             raise
@@ -107,7 +106,7 @@ class RepoXML:
 
     def _validate_dependencies(self, config: ExportConfig) -> None:
         """Check optional dependencies if their features are enabled."""
-        if config.count_tokens:
+        if config.token.enabled:
             try:
                 import transformers  # noqa: F401
             except ImportError:
@@ -140,64 +139,67 @@ class RepoXML:
         # --- Gitignore provider ---
         gitignore_engine = GitignoreEngine(
             root_path=root,
-            user_ignore=config.ignore_patterns,
-            user_include=config.include_patterns,
+            user_ignore=config.scan.ignore_patterns,
+            user_include=config.scan.include_patterns,
         )
 
         # --- Scanner ---
         scanner = create_scanner(
-            config.source,
+            config.scan.source,
             root_path=root,
             ignore_provider=gitignore_engine,
-            use_gitignore=config.use_gitignore,
-            follow_symlinks_dirs=config.follow_symlinks_dirs,
-            symlinks_files=config.symlinks_files.value,
-            hard_exclude_dirs=set(config.hard_exclude_dirs),
-            **config.source_options,
+            use_gitignore=config.scan.use_gitignore,
+            follow_symlinks_dirs=config.scan.follow_symlinks_dirs,
+            symlinks_files=config.scan.symlinks_files.value,
+            hard_exclude_dirs=set(config.scan.hard_exclude_dirs),
+            **config.scan.source_options,
         )
 
         # --- Ingestor ---
         ingestor = StandardIngestor(
-            newline_mode=config.newline.value,
-            decode_errors=config.decode_errors.value,
+            newline_mode=config.text.newline.value,
+            decode_errors=config.text.decode_errors.value,
         )
 
         # --- Classification engine ---
         classification_engine = ClassificationEngine(
             root,
-            config_path=config.classify_config_path,
+            config_path=config.classify.config_path,
         )
 
         # --- Redaction engine (optional) ---
         redaction_engine = None
-        if config.redact:
+        if config.redact.enabled:
             redaction_engine = RedactionEngine(
                 root_path=root,
-                config_path=config.redact_config_path,
+                config_path=config.redact.config_path,
             )
 
         # --- Token counter (optional) ---
         token_counter = None
-        if config.count_tokens:
+        if config.token.enabled:
             token_counter = create_token_counter(
                 "huggingface",
-                model=config.tokenizer_model,
+                model=config.token.model,
             )
 
         # --- Payload builder ---
         from repo2xml.application.policies import ExportPayloadBuilder
         payload_builder = ExportPayloadBuilder(
-            config=config,
+            mode=config.mode,
+            binary=config.binary,
+            text=config.text,
+            symlinks_files=config.scan.symlinks_files,
             ingestor=ingestor,
         )
 
         # --- Serializer ---
         factory = get_format_factory(config.format)
         serializer = factory.create_serializer(
-            formatting=config.formatting.value,
-            include_mtime=config.include_mtime,
-            include_size=config.include_size,
-            text_decode_errors=config.decode_errors.value,
+            formatting=config.output.formatting.value,
+            include_mtime=config.output.include_mtime,
+            include_size=config.output.include_size,
+            text_decode_errors=config.text.decode_errors.value,
         )
 
         # --- Output target (wrap the provided stream) ---
@@ -207,12 +209,12 @@ class RepoXML:
         writer_coordinator = WriterCoordinator(
             serializer=serializer,
             output_target=output_target,
-            buffer_chars=config.write_buffer_chars,
+            buffer_chars=config.output.write_buffer_chars,
         )
 
         # --- Statistics collector ---
         collector = StatisticsCollector(
-            token_counting_enabled=config.count_tokens and token_counter is not None,
+            token_counting_enabled=config.token.enabled and token_counter is not None,
         )
 
         # --- Entry processor ---
@@ -254,23 +256,23 @@ class RepoXML:
 
         gitignore_engine = GitignoreEngine(
             root_path=root,
-            user_ignore=config.ignore_patterns,
-            user_include=config.include_patterns,
+            user_ignore=config.scan.ignore_patterns,
+            user_include=config.scan.include_patterns,
         )
 
         scanner = create_scanner(
-            config.source,
+            config.scan.source,
             root_path=root,
             ignore_provider=gitignore_engine,
-            use_gitignore=config.use_gitignore,
-            follow_symlinks_dirs=config.follow_symlinks_dirs,
-            symlinks_files=config.symlinks_files.value,
-            hard_exclude_dirs=set(config.hard_exclude_dirs),
-            **config.source_options,
+            use_gitignore=config.scan.use_gitignore,
+            follow_symlinks_dirs=config.scan.follow_symlinks_dirs,
+            symlinks_files=config.scan.symlinks_files.value,
+            hard_exclude_dirs=set(config.scan.hard_exclude_dirs),
+            **config.scan.source_options,
         )
 
         entries = list(scanner.scan())
-        entries = apply_file_filters(entries, config)
+        entries = apply_file_filters(entries, config.filter)
         entries.sort(key=lambda e: e.rel_path)
         return entries
 

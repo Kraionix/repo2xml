@@ -14,15 +14,23 @@ from repo2xml.application.progress import NullProgressReporter, RichProgressRepo
 from repo2xml.cli.reporting import build_tree, print_breakdown
 from repo2xml.cli.ui import LogLevel
 from repo2xml.config import (
+    BinaryHandlingConfig,
     BinaryMode,
+    ClassifyConfig,
     DecodeErrors,
     ExportConfig,
+    FilterConfig,
     Formatting,
     Mode,
     NewlineMode,
+    OutputFormatConfig,
+    RedactConfig,
     RestoreConfig,
     RootPathMode,
+    ScanConfig,
     SymlinkFilesMode,
+    TextHandlingConfig,
+    TokenCountConfig,
 )
 from repo2xml.domain.exceptions import (
     ConfigurationError,
@@ -161,38 +169,62 @@ def execute_export(
             source_opts[key.strip()] = value.strip()
 
     try:
-        config = ExportConfig(
-            format="xml",
-            mode=mode,
-            formatting=formatting,
-            binary=binary,
-            newline=newline,
-            decode_errors=decode_errors,
-            include_timestamp=not no_timestamp,
-            root_path_mode=root_path_mode,
-            include_mtime=not no_mtime,
-            include_size=not no_size,
+        scan = ScanConfig(
             use_gitignore=gitignore,
             ignore_patterns=user_ignore,
             include_patterns=list(include) if include else [],
             hard_exclude_dirs=hard_exclude,
             follow_symlinks_dirs=follow_symlinks_dirs,
             symlinks_files=symlinks_files,
-            max_text_size=max_size,
-            max_base64_size=max_size,
-            max_hash_size=0,
-            report=report,
+            source=source,
+            source_options=source_opts,
+        )
+        filter_ = FilterConfig(
             min_file_size=size_min,
             max_file_size=size_max,
             newer_than=newer_ts,
             older_than=older_ts,
-            source=source,
-            source_options=source_opts,
-            redact=redact,
-            redact_config_path=redact_config,
-            classify_config_path=classify_config,
-            count_tokens=count_tokens,
-            tokenizer_model=tokenizer_model,
+        )
+        output_format = OutputFormatConfig(
+            formatting=formatting,
+            include_timestamp=not no_timestamp,
+            include_mtime=not no_mtime,
+            include_size=not no_size,
+            root_path_mode=root_path_mode,
+        )
+        binary_cfg = BinaryHandlingConfig(
+            mode=binary,
+            max_base64_size=max_size,
+            max_hash_size=0,
+        )
+        text_cfg = TextHandlingConfig(
+            max_text_size=max_size,
+            newline=newline,
+            decode_errors=decode_errors,
+        )
+        redact_cfg = RedactConfig(
+            enabled=redact,
+            config_path=redact_config,
+        )
+        classify_cfg = ClassifyConfig(
+            config_path=classify_config,
+        )
+        token_cfg = TokenCountConfig(
+            enabled=count_tokens,
+            model=tokenizer_model,
+        )
+
+        config = ExportConfig(
+            mode=mode,
+            format="xml",
+            scan=scan,
+            filter=filter_,
+            output=output_format,
+            binary=binary_cfg,
+            text=text_cfg,
+            redact=redact_cfg,
+            classify=classify_cfg,
+            token=token_cfg,
         )
         config.normalize()
         config.validate()

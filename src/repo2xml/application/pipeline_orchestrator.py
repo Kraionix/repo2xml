@@ -69,7 +69,7 @@ class PipelineOrchestrator:
             self.progress.advance(1)
 
         original_count = len(entries)
-        entries = apply_file_filters(entries, self.config)
+        entries = apply_file_filters(entries, self.config.filter)
         if len(entries) != original_count:
             logger.info(
                 "File-level filters removed %d entries (%d remaining).",
@@ -104,18 +104,16 @@ class PipelineOrchestrator:
         # 2. Prepare meta and write header / structure (skip if stats_only)
         # ------------------------------------------------------------------
         generated_at = None
-        if self.config.include_timestamp:
+        if self.config.output.include_timestamp:
             generated_at = datetime.now(timezone.utc).isoformat()
 
         meta = ExportMeta(
-            root_path=format_root_path(self.root_path, self.config.root_path_mode),
+            root_path=format_root_path(self.root_path, self.config.output.root_path_mode),
             generated_at_utc=generated_at,
             tool_version=tool_version("repo2xml"),
             schema_version=SCHEMA_VERSION,
         )
 
-        # Если stats_only, не открываем writer_coordinator (или открываем, но не пишем)
-        # В целях упрощения, мы всё равно используем контекстный менеджер, но пропускаем запись.
         with self.writer_coordinator:
             if not stats_only:
                 self.writer_coordinator.write_header(meta)

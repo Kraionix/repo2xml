@@ -44,14 +44,17 @@ class EntryProcessor:
         # Build or reuse payload builder (if not provided)
         if payload_builder is None:
             self.payload_builder = ExportPayloadBuilder(
-                config=self.config,
+                mode=config.mode,
+                binary=config.binary,
+                text=config.text,
+                symlinks_files=config.scan.symlinks_files,
                 ingestor=self.ingestor,
             )
         else:
             self.payload_builder = payload_builder
 
         # Determine if token counting is enabled
-        self._token_counting_enabled = self.config.count_tokens and self.token_counter is not None
+        self._token_counting_enabled = config.token.enabled and self.token_counter is not None
 
     def process(self, entry: FileEntry) -> ProcessResult:
         """
@@ -93,7 +96,6 @@ class EntryProcessor:
                     token_count = self.token_counter.count(payload.text, ext=entry.ext)
                 except Exception as e:
                     logger.warning("Token counting failed for %s: %s", entry.rel_path, e)
-                    # Возвращаем ошибку, а не успех с token_count=0
                     return ProcessResult(
                         status="error",
                         error_code="tokenization_error",
@@ -108,7 +110,6 @@ class EntryProcessor:
             )
 
         except Exception as e:
-            # Catch any unexpected exception and treat as error
             logger.exception("Unexpected error processing %s", entry.rel_path)
             return ProcessResult(
                 status="error",
