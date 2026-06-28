@@ -48,11 +48,11 @@ class TestRedactionEngine:
         assert "token-12345" not in result
         assert "<REDACTED>" in result
 
-        # get_stats now returns a dict
         stats = engine.get_stats()
-        assert stats.get("total_files_processed") == 1
-        assert stats.get("total_matches") == 1
-        assert stats.get("matches_by_rule", {}).get("custom") == 1
+        # Now stats is a RedactionStats object, not a dict
+        assert stats.total_files_processed == 1
+        assert stats.total_matches == 1
+        assert stats.matches_by_rule.get("custom") == 1
 
     def test_process_excluded_file(self, engine: RedactionEngine, entry: FileEntry) -> None:
         engine._exclusion = MagicMock()
@@ -62,16 +62,16 @@ class TestRedactionEngine:
         assert result == text
 
         stats = engine.get_stats()
-        assert stats.get("total_files_skipped") == 1
-        assert stats.get("total_files_processed") == 0
+        assert stats.total_files_skipped == 1
+        assert stats.total_files_processed == 0
 
     def test_get_stats(self, engine: RedactionEngine) -> None:
         stats = engine.get_stats()
-        # get_stats returns a dict
-        assert stats.get("total_files_processed") == 0
-        assert stats.get("total_files_skipped") == 0
-        assert stats.get("total_matches") == 0
-        assert stats.get("matches_by_rule") == {}
+        # get_stats returns a RedactionStats object
+        assert stats.total_files_processed == 0
+        assert stats.total_files_skipped == 0
+        assert stats.total_matches == 0
+        assert stats.matches_by_rule == {}
 
     @patch("repo2xml.services.ingest.redact.engine.load_rules")
     def test_load_config_from_file(self, mock_load_rules, tmp_path: Path) -> None:

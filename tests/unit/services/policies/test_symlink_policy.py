@@ -49,7 +49,8 @@ class TestSymlinkPolicy:
         payload = policy.apply(symlink_entry, classification)
         assert isinstance(payload, SkippedPayload)
         assert payload.code == SkipCode.unknown
-        assert "symlink_files_mode=skip" in payload.message
+        # The message is generic, so we check the code and detail
+        assert payload.detail == {"reason": "symlink_files_mode=skip"}
 
     def test_follow_returns_none(self, symlink_entry: FileEntry, classification: ClassificationResult) -> None:
         policy = SymlinkPolicy(SymlinkFilesMode.follow)

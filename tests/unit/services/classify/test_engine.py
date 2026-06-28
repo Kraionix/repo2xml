@@ -41,8 +41,9 @@ class TestClassificationEngine:
         assert result.kind == "text"
         assert result.encoding == "utf-8"
         stats = engine.get_stats()
-        assert stats["total_files"] == 1
-        assert stats["by_extension"] == 1
+        assert stats.total_files == 1
+        assert stats.by_extension == 1
+        assert stats.errors == 0
 
     @patch("repo2xml.services.classify.engine.load_config")
     def test_classify_binary_extension(self, mock_load_config, tmp_path: Path) -> None:
@@ -66,7 +67,8 @@ class TestClassificationEngine:
         result = engine.classify(entry)
         assert result.kind == "binary"
         stats = engine.get_stats()
-        assert stats["by_extension"] == 1
+        assert stats.by_extension == 1
+        assert stats.total_files == 1
 
     @patch("repo2xml.services.classify.engine.load_config")
     def test_classify_by_content_text(self, mock_load_config, tmp_path: Path) -> None:
@@ -91,7 +93,8 @@ class TestClassificationEngine:
         assert result.kind == "text"
         assert result.encoding is not None
         stats = engine.get_stats()
-        assert stats["by_content"] == 1
+        assert stats.by_content == 1
+        assert stats.total_files == 1
 
     @patch("repo2xml.services.classify.engine.load_config")
     def test_classify_by_content_binary_with_null(self, mock_load_config, tmp_path: Path) -> None:
@@ -137,7 +140,8 @@ class TestClassificationEngine:
         assert result.kind == "error"
         assert result.error is not None
         stats = engine.get_stats()
-        assert stats["errors"] == 1
+        assert stats.errors == 1
+        assert stats.total_files == 1
 
     @patch("repo2xml.services.classify.engine.load_config")
     def test_classify_with_user_config(self, mock_load_config, tmp_path: Path) -> None:
@@ -167,7 +171,7 @@ class TestClassificationEngine:
         # Classify a file to update stats
         engine.classify(entry)
         stats = engine.get_stats()
-        assert "total_files" in stats
-        assert stats["total_files"] == 1
-        assert "by_extension" in stats
-        assert "errors" in stats
+        # Now stats is a ClassificationStats object, not a dict
+        assert stats.total_files == 1
+        assert stats.by_extension == 1
+        assert stats.errors == 0
