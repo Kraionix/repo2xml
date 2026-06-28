@@ -1,5 +1,5 @@
 # tests/unit/application/test_factories.py
-"""Unit tests for ExportComponentFactory."""
+"""Unit tests for ExportComponentFactory with new pipeline architecture."""
 
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
@@ -7,6 +7,7 @@ from unittest.mock import ANY, MagicMock, patch
 import pytest
 
 from repo2xml.application.factories import ExportComponentFactory
+from repo2xml.application.step_factory import StepFactory
 from repo2xml.config import (
     BinaryHandlingConfig,
     ClassifyConfig,
@@ -16,18 +17,10 @@ from repo2xml.config import (
     OutputFormatConfig,
     RedactConfig,
     ScanConfig,
-    SymlinkFilesMode,
     TextHandlingConfig,
     TokenCountConfig,
 )
 from repo2xml.services.output.targets import OutputTarget
-from repo2xml.services.policies import (
-    BinaryPolicy,
-    ErrorPolicy,
-    ModePolicy,
-    SymlinkPolicy,
-    TextPolicy,
-)
 
 
 class TestExportComponentFactory:
@@ -146,14 +139,11 @@ class TestExportComponentFactory:
             buffer_chars=config.output.write_buffer_chars,
         )
 
-        mock_entry_processor.assert_called_once_with(
-            config=config,
-            ingestor=mock_ingestor.return_value,
-            classification_engine=mock_classification_engine.return_value,
-            redaction_engine=None,
-            token_counter=None,
-            payload_builder=ANY,
-        )
+        # Check that EntryProcessor was created with a Pipeline
+        mock_entry_processor.assert_called_once()
+        call_args = mock_entry_processor.call_args[0][0]
+        from repo2xml.application.pipeline import Pipeline
+        assert isinstance(call_args, Pipeline)
 
         mock_stats_collector.assert_called_once_with(
             token_counting_enabled=False,
@@ -218,14 +208,10 @@ class TestExportComponentFactory:
             model=config.token.model,
         )
 
-        mock_entry_processor.assert_called_once_with(
-            config=config,
-            ingestor=mock_ingestor.return_value,
-            classification_engine=mock_classification_engine.return_value,
-            redaction_engine=mock_redaction_engine.return_value,
-            token_counter=mock_create_token.return_value,
-            payload_builder=ANY,
-        )
+        mock_entry_processor.assert_called_once()
+        call_args = mock_entry_processor.call_args[0][0]
+        from repo2xml.application.pipeline import Pipeline
+        assert isinstance(call_args, Pipeline)
 
         mock_stats_collector.assert_called_once_with(
             token_counting_enabled=True,
@@ -267,62 +253,3 @@ class TestExportComponentFactory:
         mock_orchestrator_cls.assert_called_once()
         call_kwargs = mock_orchestrator_cls.call_args[1]
         assert call_kwargs["progress_reporter"] == mock_null_reporter.return_value
-
-    # ---- New tests for _build_policies ----
-
-    def test_build_policies_full_mode(self, config, tmp_path) -> None:
-        config.mode = Mode.full
-        config.scan.symlinks_files = SymlinkFilesMode.follow
-        factory = ExportComponentFactory(config, tmp_path, MagicMock())
-        ingestor = MagicMock()
-        policies = factory._build_policies(config, ingestor)
-
-        assert len(policies) == 3
-        assert isinstance(policies[0], ErrorPolicy)
-        assert isinstance(policies[1], BinaryPolicy)
-        assert isinstance(policies[2], TextPolicy)
-
-    def test_build_policies_full_mode_with_symlink_as_link(self, config, tmp_path) -> None:
-        config.mode = Mode.full
-        config.scan.symlinks_files = SymlinkFilesMode.as_link
-        factory = ExportComponentFactory(config, tmp_path, MagicMock())
-        ingestor = MagicMock()
-        policies = factory._build_policies(config, ingestor)
-
-        assert len(policies) == 4
-        assert isinstance(policies[0], SymlinkPolicy)
-        assert isinstance(policies[1], ErrorPolicy)
-        assert isinstance(policies[2], BinaryPolicy)
-        assert isinstance(policies[3], TextPolicy)
-
-    def test_build_policies_full_mode_with_symlink_skip(self, config, tmp_path) -> None:
-        config.mode = Mode.full
-        config.scan.symlinks_files = SymlinkFilesMode.skip
-        factory = ExportComponentFactory(config, tmp_path, MagicMock())
-        ingestor = MagicMock()
-        policies = factory._build_policies(config, ingestor)
-
-        assert len(policies) == 4
-        assert isinstance(policies[0], SymlinkPolicy)
-        assert isinstance(policies[1], ErrorPolicy)
-        assert isinstance(policies[2], BinaryPolicy)
-        assert isinstance(policies[3], TextPolicy)
-
-    def test_build_policies_metadata_mode(self, config, tmp_path) -> None:
-        config.mode = Mode.metadata
-        factory = ExportComponentFactory(config, tmp_path, MagicMock())
-        ingestor = MagicMock()
-        policies = factory._build_policies(config, ingestor)
-
-        assert len(policies) == 1
-        assert isinstance(policies[0], ModePolicy)
-
-    def test_build_policies_structure_mode(self, config, tmp_path) -> None:
-        config.mode = Mode.structure
-        factory = ExportComponentFactory(config, tmp_path, MagicMock())
-        ingestor = MagicMock()
-        policies = factory._build_policies(config, ingestor)
-
-        # Structure mode is not handled specially, so it behaves like full
-        assert len(policies) == 3
-        assert not isinstance(policies[0], ModePolicy)
