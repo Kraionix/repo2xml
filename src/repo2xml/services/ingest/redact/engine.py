@@ -54,14 +54,9 @@ class RedactionEngine(StatsProvider):
                 text = new_text
         return text
 
-    def get_stats(self) -> dict[str, object]:
-        """Return redaction statistics as a dict for StatsProvider."""
-        return {
-            "total_files_processed": self._stats.total_files_processed,
-            "total_files_skipped": self._stats.total_files_skipped,
-            "total_matches": self._stats.total_matches,
-            "matches_by_rule": dict(self._stats.matches_by_rule),
-        }
+    def get_stats(self) -> RedactionStats:
+        """Return redaction statistics as a RedactionStats object."""
+        return self._stats
 
     def _load_user_config(self, explicit_path: Optional[Path]) -> Optional[dict]:
         path = explicit_path

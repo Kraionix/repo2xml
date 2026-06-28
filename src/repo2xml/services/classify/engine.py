@@ -66,11 +66,6 @@ class ClassificationEngine(StatsProvider):
             return ClassificationResult(kind="binary", encoding=bom_enc, sample=sample)
         return ClassificationResult(kind="text", encoding=bom_enc or "utf-8", sample=sample)
 
-    def get_stats(self) -> dict[str, object]:
-        """Return classification statistics as a dict for StatsProvider."""
-        return {
-            "total_files": self._stats.total_files,
-            "by_extension": self._stats.by_extension,
-            "by_content": self._stats.by_content,
-            "errors": self._stats.errors,
-        }
+    def get_stats(self) -> ClassificationStats:
+        """Return classification statistics as a ClassificationStats object."""
+        return self._stats

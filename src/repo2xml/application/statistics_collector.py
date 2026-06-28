@@ -5,6 +5,8 @@ from typing import Dict, List, Optional, Any
 
 from repo2xml.contracts import StatsProvider
 from repo2xml.domain.model import ExportStats, TokenStats
+from repo2xml.services.classify.models import ClassificationStats
+from repo2xml.services.ingest.redact.models import RedactionStats
 from repo2xml.services.scan.scanner import ScanStats
 
 
@@ -62,24 +64,20 @@ class StatisticsCollector:
 
     def get_export_stats(self, scan_warning_summary: Optional[str] = None) -> ExportStats:
         """Return the final ExportStats object, including stats from all providers."""
-        # Gather stats from providers
         redaction_stats = None
         classification_stats = None
         scan_stats = None
 
         for provider in self._providers:
             stats = provider.get_stats()
-            # Heuristic: inspect keys to assign to known fields
-            if "total_files_processed" in stats or "matches_by_rule" in stats:
+            # Type-based dispatch using isinstance with concrete dataclasses
+            if isinstance(stats, RedactionStats):
                 redaction_stats = stats
-            elif "total_files" in stats and "by_extension" in stats:
+            elif isinstance(stats, ClassificationStats):
                 classification_stats = stats
-            elif "dirs_scandir_errors" in stats or "errors_by_type" in stats:
-                # Convert dict to a ScanStats object if needed, or keep as dict
+            elif isinstance(stats, ScanStats):
                 scan_stats = stats
 
-        # If scan_stats is a dict, we might want to convert it to ScanStats,
-        # but ExportStats accepts Any, so we can keep it as dict.
         return ExportStats(
             files_total=self._total_processed + self._total_skipped + self._total_errors,
             files_emitted=self._total_processed,

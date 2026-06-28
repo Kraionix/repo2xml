@@ -153,14 +153,13 @@ def execute_export(
                 table = Table(title="Redaction Statistics", show_header=True, header_style="bold")
                 table.add_column("Metric", style="dim")
                 table.add_column("Value", justify="right")
-                table.add_row("Files processed", str(rs.get("total_files_processed", 0)))
-                table.add_row("Files skipped", str(rs.get("total_files_skipped", 0)))
-                table.add_row("Total matches", str(rs.get("total_matches", 0)))
-                matches = rs.get("matches_by_rule", {})
-                if matches:
+                table.add_row("Files processed", str(rs.total_files_processed))
+                table.add_row("Files skipped", str(rs.total_files_skipped))
+                table.add_row("Total matches", str(rs.total_matches))
+                if rs.matches_by_rule:
                     table.add_section()
                     table.add_row("Matches by rule", "")
-                    for rule_name, count in sorted(matches.items(), key=lambda x: -x[1]):
+                    for rule_name, count in sorted(rs.matches_by_rule.items(), key=lambda x: -x[1]):
                         table.add_row(f"  {rule_name}", str(count))
                 console.print(table)
 
@@ -169,11 +168,11 @@ def execute_export(
                 table = Table(title="Classification Statistics", show_header=True, header_style="bold")
                 table.add_column("Metric", style="dim")
                 table.add_column("Value", justify="right")
-                table.add_row("Total files", str(cs.get("total_files", 0)))
-                table.add_row("By extension", str(cs.get("by_extension", 0)))
-                table.add_row("By content analysis", str(cs.get("by_content", 0)))
-                if cs.get("errors", 0):
-                    table.add_row("Errors", str(cs.get("errors", 0)))
+                table.add_row("Total files", str(cs.total_files))
+                table.add_row("By extension", str(cs.by_extension))
+                table.add_row("By content analysis", str(cs.by_content))
+                if cs.errors:
+                    table.add_row("Errors", str(cs.errors))
                 console.print(table)
 
         # Token statistics

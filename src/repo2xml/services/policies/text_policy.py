@@ -12,6 +12,7 @@ from repo2xml.domain.model import (
     ErrorPayload,
     FileEntry,
     FilePayload,
+    SkipCode,
     SkipInfo,
     SkippedPayload,
     TextPayload,

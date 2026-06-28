@@ -11,6 +11,7 @@ from repo2xml.domain.model import (
     FilePayload,
     LinkPayload,
     SkipCode,
+    SkipInfo,
     SkippedPayload,
 )
 from repo2xml.application.policies import ReasonFormatter
