@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from repo2xml.contracts import StatsProvider
-from repo2xml.domain.model import FileEntry
+from repo2xml.domain.model import ExportStats, FileEntry
 from repo2xml.services.classify.classifiers import (
     SNIFF_BYTES,
     ExtensionClassifier,
@@ -69,3 +69,7 @@ class ClassificationEngine(StatsProvider):
     def get_stats(self) -> ClassificationStats:
         """Return classification statistics as a ClassificationStats object."""
         return self._stats
+
+    def apply_to(self, stats: ExportStats) -> None:
+        """Apply classification statistics to ExportStats."""
+        stats.classification_stats = self._stats

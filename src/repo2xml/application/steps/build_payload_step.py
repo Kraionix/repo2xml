@@ -7,7 +7,7 @@ from repo2xml.contracts import FilePolicy
 from repo2xml.application.processing_context import ProcessingContext
 from repo2xml.application.step import Step
 from repo2xml.config import Mode
-from repo2xml.domain.model import ErrorPayload, ErrorCode, SkippedPayload
+from repo2xml.domain.model import ErrorPayload, ErrorCode, SkippedPayload, SkipCode
 
 
 class BuildPayloadStep(Step):
@@ -37,7 +37,7 @@ class BuildPayloadStep(Step):
             # Should not happen if ClassifyStep ran first (except metadata mode)
             ctx.should_stop = True
             ctx.is_success = False
-            ctx.error_code = "missing_classification"
+            ctx.error_code = ErrorCode.unknown
             ctx.message = "Classification result is missing"
             return
 
@@ -63,10 +63,10 @@ class BuildPayloadStep(Step):
             ctx.should_stop = True
             ctx.is_success = False
             if isinstance(payload, SkippedPayload):
-                ctx.skip_code = payload.code.value
+                ctx.skip_code = payload.code
                 ctx.message = payload.message
             else:
-                ctx.error_code = payload.code.value
+                ctx.error_code = payload.code
                 ctx.message = payload.message
         else:
             ctx.is_success = True

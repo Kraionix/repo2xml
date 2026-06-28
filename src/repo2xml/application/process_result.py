@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from repo2xml.domain.model import FilePayload
+from repo2xml.domain.model import FilePayload, SkipCode, ErrorCode
 
 
 @dataclass(slots=True)
@@ -16,16 +16,16 @@ class ProcessResult:
         status: One of 'success', 'skipped', 'error'.
         payload: The FilePayload if status is 'success', else None.
         token_count: Number of tokens counted (if enabled and successful), else None.
-        skip_code: A string code explaining why the file was skipped (if status is 'skipped').
-        error_code: A string code explaining why the file failed (if status is 'error').
+        skip_code: A code explaining why the file was skipped (if status is 'skipped').
+        error_code: A code explaining why the file failed (if status is 'error').
         message: A human-readable message for logging or debugging.
     """
 
     status: str  # 'success', 'skipped', 'error'
     payload: Optional[FilePayload] = None
     token_count: Optional[int] = None
-    skip_code: Optional[str] = None
-    error_code: Optional[str] = None
+    skip_code: Optional[SkipCode] = None
+    error_code: Optional[ErrorCode] = None
     message: Optional[str] = None
 
     def __post_init__(self) -> None:

@@ -10,7 +10,7 @@ from typing import Dict, List, Optional
 import yaml
 
 from repo2xml.contracts import StatsProvider
-from repo2xml.domain.model import FileEntry
+from repo2xml.domain.model import ExportStats, FileEntry
 from repo2xml.services.ingest.redact.exclusion import ExclusionManager
 from repo2xml.services.ingest.redact.models import RedactionStats, Rule
 from repo2xml.services.ingest.redact.rule_loader import load_rules
@@ -57,6 +57,10 @@ class RedactionEngine(StatsProvider):
     def get_stats(self) -> RedactionStats:
         """Return redaction statistics as a RedactionStats object."""
         return self._stats
+
+    def apply_to(self, stats: ExportStats) -> None:
+        """Apply redaction statistics to ExportStats."""
+        stats.redaction_stats = self._stats
 
     def _load_user_config(self, explicit_path: Optional[Path]) -> Optional[dict]:
         path = explicit_path

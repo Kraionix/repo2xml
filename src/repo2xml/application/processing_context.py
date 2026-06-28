@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
-from repo2xml.domain.model import ClassificationResult, FileEntry, FilePayload
+from repo2xml.domain.model import ClassificationResult, FileEntry, FilePayload, SkipCode, ErrorCode
 
 
 @dataclass(slots=True)
@@ -23,8 +23,8 @@ class ProcessingContext:
 
     should_stop: bool = False
     is_success: bool = False
-    skip_code: Optional[str] = None
-    error_code: Optional[str] = None
+    skip_code: Optional[SkipCode] = None
+    error_code: Optional[ErrorCode] = None
     message: Optional[str] = None
 
     # Arbitrary metadata for extensions
