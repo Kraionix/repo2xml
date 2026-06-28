@@ -2,74 +2,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from pathlib import Path
-from typing import BinaryIO, List, Optional, Set, Type
+from typing import BinaryIO, Set, Type
 
-from repo2xml.domain.model import (
-    ExportMeta,
-    FileEntry,
-    FilePayload,
-    ParsedRepository,
-    TokenStats,
-)
-from repo2xml.services.serialize.base import WriteFn
-
-
-class DocumentMetadataWriter(ABC):
-    """Writes document‑level metadata: header, footer, and statistics."""
-
-    @abstractmethod
-    def write_header(self, meta: ExportMeta, write: WriteFn) -> None:
-        """Write the document header."""
-        ...
-
-    @abstractmethod
-    def write_footer(self, write: WriteFn) -> None:
-        """Write the document footer (closing tags)."""
-        ...
-
-    @abstractmethod
-    def write_statistics(self, token_stats: Optional[TokenStats], write: WriteFn) -> None:
-        """Write aggregated statistics (e.g., total tokens)."""
-        ...
-
-
-class StructureWriter(ABC):
-    """Writes the project directory tree structure."""
-
-    @abstractmethod
-    def write_structure(self, entries: List[FileEntry], write: WriteFn) -> None:
-        """Write the hierarchical project structure."""
-        ...
-
-
-class FileSectionWriter(ABC):
-    """Opens and closes the section that contains file entries."""
-
-    @abstractmethod
-    def write_files_open(self, mode: str, write: WriteFn) -> None:
-        """Open the <files> section with the given mode attribute."""
-        ...
-
-    @abstractmethod
-    def write_files_close(self, write: WriteFn) -> None:
-        """Close the <files> section."""
-        ...
-
-
-class FileContentWriter(ABC):
-    """Writes a single file entry with its payload."""
-
-    @abstractmethod
-    def write_file(
-        self,
-        entry: FileEntry,
-        payload: FilePayload,
-        write: WriteFn,
-        token_count: Optional[int] = None,
-    ) -> None:
-        """Write one file entry."""
-        ...
+from repo2xml.contracts.document_writer import DocumentWriter
+from repo2xml.domain.model import FilePayload, ParsedRepository
 
 
 class Deserializer(ABC):
@@ -86,18 +22,16 @@ class Deserializer(ABC):
 
 
 class FormatFactory(ABC):
-    """Creates a Serializer / Deserializer pair for a given format."""
+    """Creates a DocumentWriter / Deserializer pair for a given format."""
 
     @abstractmethod
-    def create_serializer(self, **kwargs) -> (
-        DocumentMetadataWriter & StructureWriter & FileSectionWriter & FileContentWriter
-    ):
-        """Create a serializer instance implementing all four writer interfaces."""
+    def create_document_writer(self, **kwargs) -> DocumentWriter:
+        """Create a DocumentWriter instance for the format."""
         ...
 
     @abstractmethod
     def create_deserializer(self, **kwargs) -> Deserializer:
-        """Create a deserializer instance."""
+        """Create a Deserializer instance."""
         ...
 
     @classmethod

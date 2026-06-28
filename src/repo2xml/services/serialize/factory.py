@@ -8,11 +8,11 @@ from repo2xml.domain.exceptions import SerializationError
 
 
 class XmlFormatFactory(FormatFactory):
-    def create_serializer(self, **kwargs) -> 'Serializer':
-        from repo2xml.services.serialize.xml.serializer import XMLSerializer
-        return XMLSerializer(**kwargs)
+    def create_document_writer(self, **kwargs):
+        from repo2xml.services.serialize.xml.document_writer import XMLDocumentWriter
+        return XMLDocumentWriter(**kwargs)
 
-    def create_deserializer(self, **kwargs) -> 'Deserializer':
+    def create_deserializer(self, **kwargs):
         from repo2xml.services.serialize.xml.deserializer import XMLDeserializer
         return XMLDeserializer()
 

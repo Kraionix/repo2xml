@@ -1,8 +1,54 @@
-"""
-Domain model types.
+# src/repo2xml/domain/__init__.py
+from .model import (
+    BinaryBase64Payload,
+    BinaryHashPayload,
+    ClassificationResult,
+    ErrorCode,
+    ErrorInfo,
+    ErrorPayload,
+    ExportMeta,
+    ExportStats,
+    FileEntry,
+    FilePayload,
+    LinkPayload,
+    MetadataPayload,
+    ParsedRepository,
+    ProcessingInput,
+    ProcessingResult,
+    RestoreEntry,
+    RestoreMeta,
+    RestoreStats,
+    SkipCode,
+    SkipInfo,
+    SkippedPayload,
+    TextPayload,
+    TextReadResult,
+    TokenStats,
+)
 
-This package contains stable, format-agnostic primitives used across the pipeline:
-- FileEntry: discovered file metadata
-- Payload types: what we decide to emit for each entry
-- ExportMeta/ExportStats: high-level execution data
-"""
+__all__ = [
+    "BinaryBase64Payload",
+    "BinaryHashPayload",
+    "ClassificationResult",
+    "ErrorCode",
+    "ErrorInfo",
+    "ErrorPayload",
+    "ExportMeta",
+    "ExportStats",
+    "FileEntry",
+    "FilePayload",
+    "LinkPayload",
+    "MetadataPayload",
+    "ParsedRepository",
+    "ProcessingInput",
+    "ProcessingResult",
+    "RestoreEntry",
+    "RestoreMeta",
+    "RestoreStats",
+    "SkipCode",
+    "SkipInfo",
+    "SkippedPayload",
+    "TextPayload",
+    "TextReadResult",
+    "TokenStats",
+]

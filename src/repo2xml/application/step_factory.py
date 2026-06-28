@@ -14,10 +14,6 @@ from repo2xml.config import ExportConfig, Mode
 
 
 class StepFactory:
-    """
-    Factory that creates the ordered list of processing steps based on configuration.
-    """
-
     def __init__(
         self,
         config: ExportConfig,
@@ -31,7 +27,7 @@ class StepFactory:
     def create_steps(self) -> List[Step]:
         steps: List[Step] = []
 
-        # 1. Classification (skip in metadata mode – no content analysis needed)
+        # 1. Classification (skip in metadata mode)
         if self._config.mode != Mode.metadata:
             steps.append(ClassifyStep(self._services.classification_engine))
 

@@ -1,41 +1,24 @@
 # src/repo2xml/contracts/__init__.py
-"""
-Public contracts (protocols and abstract base classes) used across layers.
-
-This package contains all interfaces that define the behaviour of
-pluggable components. It is imported by both services and application
-layers, ensuring that dependencies point inward.
-"""
-
-from .scan import ScannerLike, ScanStatsLike, IgnoreProvider
+from .document_writer import DocumentWriter
 from .ingest import IngestorLike
-from .serialize import (
-    DocumentMetadataWriter,
-    StructureWriter,
-    FileSectionWriter,
-    FileContentWriter,
-    Deserializer,
-    FormatFactory,
-)
-from .tokenize import TokenCounter, TokenCounterFactory
-from .progress import ProgressReporter
-from .stats import StatsProvider
 from .policies import FilePolicy
+from .progress import ProgressReporter
+from .scan import IgnoreProvider, ScannerLike, ScanStatsLike
+from .serialize import Deserializer, FormatFactory
+from .stats import StatsProvider
+from .tokenize import TokenCounter, TokenCounterFactory
 
 __all__ = [
+    "DocumentWriter",
+    "IngestorLike",
+    "FilePolicy",
+    "ProgressReporter",
+    "IgnoreProvider",
     "ScannerLike",
     "ScanStatsLike",
-    "IgnoreProvider",
-    "IngestorLike",
-    "DocumentMetadataWriter",
-    "StructureWriter",
-    "FileSectionWriter",
-    "FileContentWriter",
     "Deserializer",
     "FormatFactory",
+    "StatsProvider",
     "TokenCounter",
     "TokenCounterFactory",
-    "ProgressReporter",
-    "StatsProvider",
-    "FilePolicy",
 ]

@@ -4,52 +4,34 @@ from __future__ import annotations
 from typing import List
 
 from repo2xml.contracts import FilePolicy
-from repo2xml.application.processing_context import ProcessingContext
 from repo2xml.application.step import Step
 from repo2xml.config import Mode
-from repo2xml.domain.model import ErrorPayload, ErrorCode, SkippedPayload, SkipCode
+from repo2xml.domain.model import ErrorPayload, ErrorCode, SkippedPayload, ProcessingInput, ProcessingResult
 
 
 class BuildPayloadStep(Step):
-    """
-    Step that builds the appropriate FilePayload for the file.
-
-    This step applies a chain of FilePolicy objects in order. The first policy
-    that returns a non-None payload determines the final outcome. If no policy
-    matches, an ErrorPayload is returned as a fallback.
-    """
-
     def __init__(self, policies: List[FilePolicy], mode: Mode) -> None:
-        """
-        Args:
-            policies: Ordered list of FilePolicy instances to apply.
-            mode: Export mode (used to decide whether classification is required).
-        """
         self._policies = policies
         self._mode = mode
 
-    def process(self, ctx: ProcessingContext) -> None:
-        entry = ctx.entry
-        classification = ctx.classification
+    def process(self, input: ProcessingInput, result: ProcessingResult) -> None:
+        entry = input.entry
+        classification = result.classification
 
-        # In metadata mode, classification is deliberately skipped, so None is expected.
         if classification is None and self._mode != Mode.metadata:
-            # Should not happen if ClassifyStep ran first (except metadata mode)
-            ctx.should_stop = True
-            ctx.is_success = False
-            ctx.error_code = ErrorCode.unknown
-            ctx.message = "Classification result is missing"
+            result.should_stop = True
+            result.is_success = False
+            result.error_code = ErrorCode.unknown
+            result.message = "Classification result is missing"
             return
 
-        # Apply policies in order
         payload = None
         for policy in self._policies:
-            result = policy.apply(entry, classification)
-            if result is not None:
-                payload = result
+            res = policy.apply(entry, classification)
+            if res is not None:
+                payload = res
                 break
 
-        # Fallback if no policy matched
         if payload is None:
             payload = ErrorPayload(
                 code=ErrorCode.unknown,
@@ -57,16 +39,16 @@ class BuildPayloadStep(Step):
                 detail={"entry": entry.rel_path, "kind": classification.kind if classification else "unknown"},
             )
 
-        ctx.payload = payload
+        result.payload = payload
 
         if isinstance(payload, (SkippedPayload, ErrorPayload)):
-            ctx.should_stop = True
-            ctx.is_success = False
+            result.should_stop = True
+            result.is_success = False
             if isinstance(payload, SkippedPayload):
-                ctx.skip_code = payload.code
-                ctx.message = payload.message
+                result.skip_code = payload.code
+                result.message = payload.message
             else:
-                ctx.error_code = payload.code
-                ctx.message = payload.message
+                result.error_code = payload.code
+                result.message = payload.message
         else:
-            ctx.is_success = True
+            result.is_success = True

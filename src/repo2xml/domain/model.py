@@ -202,3 +202,39 @@ class ParsedRepository:
     meta: ExportMeta
     structure: List[FileEntry]
     files: Iterator[RestoreEntry]
+
+
+# ---- Processing pipeline input/output ----
+
+@dataclass(frozen=True, slots=True)
+class ProcessingInput:
+    """
+    Immutable input for a single file processing pipeline.
+
+    Contains the file entry and any global configuration that may be needed
+    by steps. Currently only the entry is required; additional fields can be
+    added in the future without breaking existing steps.
+    """
+    entry: FileEntry
+
+
+@dataclass(slots=True)
+class ProcessingResult:
+    """
+    Mutable result container for a single file processing pipeline.
+
+    Steps read from ProcessingInput and write to this object. The pipeline
+    stops early if should_stop is set to True.
+    """
+    classification: Optional[ClassificationResult] = None
+    payload: Optional[FilePayload] = None
+    token_count: Optional[int] = None
+
+    should_stop: bool = False
+    is_success: bool = False
+    skip_code: Optional[SkipCode] = None
+    error_code: Optional[ErrorCode] = None
+    message: Optional[str] = None
+
+    # Arbitrary metadata for extensions
+    metadata: Dict[str, Any] = field(default_factory=dict)

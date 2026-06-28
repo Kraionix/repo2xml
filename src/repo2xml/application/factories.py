@@ -38,8 +38,6 @@ logger = logging.getLogger("repo2xml.component_factory")
 class ExportComponentFactory:
     """
     Factory for creating all components needed for an export pipeline.
-
-    Encapsulates the wiring logic that was previously in facade._build_export_components.
     """
 
     def __init__(
@@ -123,21 +121,20 @@ class ExportComponentFactory:
         pipeline = Pipeline(steps)
         entry_processor = EntryProcessor(pipeline)
 
-        # --- Serializer ---
+        # --- Document writer ---
         factory = get_format_factory(config.format)
-        serializer = factory.create_serializer(
+        # We'll create the writer with a dummy write_fn and set it later in WriterCoordinator.
+        document_writer = factory.create_document_writer(
             formatting=config.output.formatting.value,
             include_mtime=config.output.include_mtime,
             include_size=config.output.include_size,
             text_decode_errors=config.text.decode_errors.value,
+            write_fn=lambda s: None,  # dummy, will be replaced
         )
 
         # --- Writer coordinator ---
         writer_coordinator = WriterCoordinator(
-            metadata_writer=serializer,
-            structure_writer=serializer,
-            section_writer=serializer,
-            content_writer=serializer,
+            document_writer=document_writer,
             output_target=self.output_target,
             buffer_chars=config.output.write_buffer_chars,
         )
