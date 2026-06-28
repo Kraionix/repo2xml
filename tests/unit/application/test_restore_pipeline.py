@@ -32,7 +32,7 @@ class TestRestorePipeline:
 
         # Mock ParsedRepository
         mock_repo = MagicMock()
-        mock_repo.files = iter([])  # empty iterator
+        mock_repo.files = iter([])
         mock_deserializer.parse.return_value = mock_repo
 
         # Mock FilesystemRestorer
@@ -54,7 +54,7 @@ class TestRestorePipeline:
             mock_restorer_cls.assert_called_once_with(
                 output_root,
                 overwrite=False,
-                skip_existing=True,  # not overwrite
+                skip_existing=True,
                 restore_mtime=True,
                 create_empty_for_missing=False,
                 allow_absolute_symlinks=False,
@@ -124,3 +124,23 @@ class TestRestorePipeline:
                 create_empty_for_missing=True,
                 allow_absolute_symlinks=False,
             )
+
+    @patch("repo2xml.application.restore_pipeline.get_format_factory")
+    def test_execute_with_no_strict_validation(self, mock_get_factory):
+        config = RestoreConfig(strict_validation=False)
+        mock_deserializer = MagicMock()
+        mock_factory = MagicMock()
+        mock_factory.create_deserializer.return_value = mock_deserializer
+        mock_get_factory.return_value = mock_factory
+        mock_repo = MagicMock()
+        mock_repo.files = iter([])
+        mock_deserializer.parse.return_value = mock_repo
+
+        with patch("repo2xml.application.restore_pipeline.FilesystemRestorer") as mock_restorer_cls:
+            pipeline = RestorePipeline(config)
+            stream = BytesIO(b"<xml/>")
+            output_root = Path("/tmp/out")
+            progress = MagicMock()
+            pipeline.execute(stream, output_root, progress)
+
+            mock_deserializer.parse.assert_called_once_with(stream, strict=False)

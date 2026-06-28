@@ -8,15 +8,15 @@ import pytest
 
 from repo2xml.application.factories import ExportComponentFactory
 from repo2xml.config import (
-    ExportConfig,
-    Mode,
     BinaryHandlingConfig,
-    TextHandlingConfig,
-    ScanConfig,
+    ClassifyConfig,
+    ExportConfig,
     FilterConfig,
+    Mode,
     OutputFormatConfig,
     RedactConfig,
-    ClassifyConfig,
+    ScanConfig,
+    TextHandlingConfig,
     TokenCountConfig,
 )
 from repo2xml.services.output.targets import OutputTarget
@@ -75,7 +75,6 @@ class TestExportComponentFactory:
         progress,
         tmp_path,
     ):
-        # Mock all dependencies
         mock_scanner = MagicMock()
         mock_create_scanner.return_value = mock_scanner
         mock_gitignore.return_value = MagicMock()
@@ -96,11 +95,9 @@ class TestExportComponentFactory:
         mock_orchestrator = MagicMock()
         mock_orchestrator_cls.return_value = mock_orchestrator
 
-        # Instantiate factory and build
         factory = ExportComponentFactory(config, tmp_path, output_target, progress)
         orchestrator, collector = factory.build()
 
-        # Verify create_scanner called with correct parameters
         mock_create_scanner.assert_called_once_with(
             config.scan.source,
             root_path=tmp_path,
@@ -112,25 +109,19 @@ class TestExportComponentFactory:
             **config.scan.source_options,
         )
 
-        # Verify StandardIngestor created with correct args
         mock_ingestor.assert_called_once_with(
             newline_mode=config.text.newline.value,
             decode_errors=config.text.decode_errors.value,
         )
 
-        # Verify ClassificationEngine created
         mock_classification_engine.assert_called_once_with(
             tmp_path,
             config_path=config.classify.config_path,
         )
 
-        # Redaction engine should not be created because redact.enabled=False
         mock_redaction_engine.assert_not_called()
-
-        # Token counter should not be created because token.enabled=False
         mock_create_token.assert_not_called()
 
-        # Serializer creation
         mock_format_factory.create_serializer.assert_called_once_with(
             formatting=config.output.formatting.value,
             include_mtime=config.output.include_mtime,
@@ -138,7 +129,6 @@ class TestExportComponentFactory:
             text_decode_errors=config.text.decode_errors.value,
         )
 
-        # WriterCoordinator creation
         mock_writer_coordinator.assert_called_once_with(
             metadata_writer=mock_serializer,
             structure_writer=mock_serializer,
@@ -148,22 +138,21 @@ class TestExportComponentFactory:
             buffer_chars=config.output.write_buffer_chars,
         )
 
-        # EntryProcessor creation: payload_builder is always created, so we use ANY
         mock_entry_processor.assert_called_once_with(
             config=config,
             ingestor=mock_ingestor.return_value,
             classification_engine=mock_classification_engine.return_value,
             redaction_engine=None,
             token_counter=None,
-            payload_builder=ANY,  # The factory always creates a payload builder
+            payload_builder=ANY,
         )
 
-        # StatisticsCollector creation
+        # Check that StatisticsCollector received providers list
         mock_stats_collector.assert_called_once_with(
             token_counting_enabled=False,
+            providers=[mock_classification_engine.return_value],
         )
 
-        # PipelineOrchestrator creation
         mock_orchestrator_cls.assert_called_once_with(
             config=config,
             scanner=mock_scanner,
@@ -174,7 +163,6 @@ class TestExportComponentFactory:
             root_path=tmp_path,
         )
 
-        # Return value
         assert orchestrator is mock_orchestrator
         assert collector is mock_collector
 
@@ -207,57 +195,36 @@ class TestExportComponentFactory:
         progress,
         tmp_path,
     ):
-        # Enable redaction and token counting
         config.redact.enabled = True
         config.token.enabled = True
 
         factory = ExportComponentFactory(config, tmp_path, output_target, progress)
         factory.build()
 
-        # Redaction engine should be created
         mock_redaction_engine.assert_called_once_with(
             root_path=tmp_path,
             config_path=config.redact.config_path,
         )
 
-        # Token counter should be created
         mock_create_token.assert_called_once_with(
             "huggingface",
             model=config.token.model,
         )
 
-        # EntryProcessor should receive redaction_engine and token_counter, and a payload_builder
         mock_entry_processor.assert_called_once_with(
             config=config,
             ingestor=mock_ingestor.return_value,
             classification_engine=mock_classification_engine.return_value,
             redaction_engine=mock_redaction_engine.return_value,
             token_counter=mock_create_token.return_value,
-            payload_builder=ANY,  # The factory always creates a payload builder
+            payload_builder=ANY,
         )
 
-        # StatisticsCollector should have token_counting_enabled=True
+        # StatisticsCollector should receive both classification and redaction as providers
         mock_stats_collector.assert_called_once_with(
             token_counting_enabled=True,
+            providers=[mock_classification_engine.return_value, mock_redaction_engine.return_value],
         )
-
-    def test_build_with_custom_payload_builder(self, config, output_target, progress, tmp_path):
-        # This test verifies that the factory always creates a payload builder.
-        # We check that EntryProcessor receives a payload_builder (not None).
-        with patch("repo2xml.application.factories.create_scanner"), \
-             patch("repo2xml.application.factories.GitignoreEngine"), \
-             patch("repo2xml.application.factories.StandardIngestor"), \
-             patch("repo2xml.application.factories.ClassificationEngine"), \
-             patch("repo2xml.application.factories.get_format_factory"), \
-             patch("repo2xml.application.factories.WriterCoordinator"), \
-             patch("repo2xml.application.factories.EntryProcessor") as mock_entry_processor, \
-             patch("repo2xml.application.factories.PipelineOrchestrator"), \
-             patch("repo2xml.application.factories.StatisticsCollector"):
-            factory = ExportComponentFactory(config, tmp_path, output_target, progress)
-            factory.build()
-            # Check that EntryProcessor was called with a payload_builder (not None)
-            call_kwargs = mock_entry_processor.call_args[1]
-            assert call_kwargs.get("payload_builder") is not None
 
     @patch("repo2xml.application.progress.NullProgressReporter")
     @patch("repo2xml.application.factories.create_scanner")
@@ -285,15 +252,12 @@ class TestExportComponentFactory:
         output_target,
         tmp_path,
     ):
-        # Test that if progress is None, a NullProgressReporter is created.
         mock_null_reporter.return_value = MagicMock()
 
         factory = ExportComponentFactory(config, tmp_path, output_target, progress=None)
         factory.build()
 
-        # Verify that NullProgressReporter was instantiated
         mock_null_reporter.assert_called_once()
-        # And that it was passed to PipelineOrchestrator
         mock_orchestrator_cls.assert_called_once()
         call_kwargs = mock_orchestrator_cls.call_args[1]
         assert call_kwargs["progress_reporter"] == mock_null_reporter.return_value

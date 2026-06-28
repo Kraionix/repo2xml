@@ -113,6 +113,7 @@ class TestPipelineOrchestrator:
         mock_writer.write_files_close.assert_called_once()
         mock_writer.write_statistics.assert_called_once()
         mock_writer.write_footer.assert_called_once()
+        # Success records should be called for each file
         assert mock_stats.record_success.call_count == 2
         assert mock_stats.record_skipped.call_count == 0
         assert mock_stats.record_error.call_count == 0

@@ -16,7 +16,6 @@ from repo2xml.domain.model import (
     ExportMeta,
     ExportStats,
     FileEntry,
-    FilePayload,
     LinkPayload,
     MetadataPayload,
     ParsedRepository,
@@ -198,6 +197,7 @@ class TestExportStats:
             redaction_stats=None,
             classification_stats=None,
             token_stats=TokenStats(),
+            scan_stats=None,
         )
         assert stats.files_total == 10
         assert stats.files_emitted == 8
@@ -209,6 +209,18 @@ class TestExportStats:
         assert stats.redaction_stats is None
         assert stats.classification_stats is None
         assert isinstance(stats.token_stats, TokenStats)
+        assert stats.scan_stats is None
+
+    def test_scan_stats_field(self) -> None:
+        """Test that scan_stats can be set in ExportStats."""
+        stats = ExportStats(
+            files_total=0,
+            files_emitted=0,
+            files_skipped=0,
+            files_errors=0,
+            scan_stats={"dirs_scandir_errors": 3},
+        )
+        assert stats.scan_stats == {"dirs_scandir_errors": 3}
 
     def test_optional_fields_none(self) -> None:
         stats = ExportStats(
@@ -221,6 +233,7 @@ class TestExportStats:
         assert stats.redaction_stats is None
         assert stats.classification_stats is None
         assert stats.token_stats is None
+        assert stats.scan_stats is None
 
 
 class TestRestoreStats:
@@ -260,7 +273,9 @@ class TestRestoreStats:
 class TestPayloads:
     def test_metadata_payload(self) -> None:
         p = MetadataPayload()
-        assert isinstance(p, FilePayload)
+        # FilePayload is a type alias (Union), not a class, so isinstance doesn't work.
+        # Instead we just check the type directly.
+        assert type(p) is MetadataPayload
 
     def test_link_payload(self) -> None:
         p = LinkPayload(link_target="/some/link")

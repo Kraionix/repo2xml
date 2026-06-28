@@ -147,3 +147,57 @@ class TestXMLStructureValidator:
         validator = XMLStructureValidator(root)
         with pytest.raises(DeserializationError, match="Unexpected element in project structure"):
             validator.validate()
+
+    # ---- New tests for business rules ----
+
+    def test_business_rule_binary_with_tokens(self) -> None:
+        """If binary='true', tokens attribute must not be present."""
+        root = self._make_root(
+            '<files mode="full"><file path="data.bin" binary="true" tokens="42"/></files>'
+        )
+        validator = XMLStructureValidator(root)
+        with pytest.raises(DeserializationError, match="binary.*tokens"):
+            validator.validate()
+
+    def test_business_rule_tokens_present_on_text_file_ok(self) -> None:
+        """Tokens attribute on text file is allowed."""
+        root = self._make_root(
+            '<files mode="full"><file path="a.txt" tokens="42"><content>hello</content></file></files>'
+        )
+        validator = XMLStructureValidator(root)
+        validator.validate()  # should pass
+
+    def test_business_rule_skipped_without_error(self) -> None:
+        """If skipped='true', there must be an <error> element."""
+        root = self._make_root(
+            '<files mode="full"><file path="a.txt" skipped="true"/></files>'
+        )
+        validator = XMLStructureValidator(root)
+        with pytest.raises(DeserializationError, match="skipped.*missing <error>"):
+            validator.validate()
+
+    def test_business_rule_skipped_with_error_ok(self) -> None:
+        """If skipped='true' and error element present, pass."""
+        root = self._make_root(
+            '<files mode="full"><file path="a.txt" skipped="true"><error>skip</error></file></files>'
+        )
+        validator = XMLStructureValidator(root)
+        validator.validate()  # should pass
+
+    def test_business_rule_base64_on_non_binary(self) -> None:
+        """If content encoding is base64 but file is not marked binary, reject."""
+        root = self._make_root(
+            '<files mode="full"><file path="a.txt"><content encoding="base64">YWJj</content></file></files>'
+        )
+        validator = XMLStructureValidator(root)
+        # Match the actual error message from the code
+        with pytest.raises(DeserializationError, match="not marked binary but content has base64 encoding"):
+            validator.validate()
+
+    def test_business_rule_tokens_without_content_ok(self) -> None:
+        """Tokens without content is fine if we don't require content."""
+        root = self._make_root(
+            '<files mode="full"><file path="a.txt" tokens="42"/></files>'
+        )
+        validator = XMLStructureValidator(root)
+        validator.validate()

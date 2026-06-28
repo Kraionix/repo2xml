@@ -1,11 +1,13 @@
 # tests/unit/services/scan/test_gitignore.py
 """Unit tests for GitignoreEngine (logic of ignore rules, no real FS)."""
 
+import time
 from pathlib import Path
 
 import pytest
 
-from repo2xml.services.scan.gitignore import GitignoreEngine, IgnoreRuleset, _normalize_gitignore_line
+from repo2xml.domain.ignore import IgnoreRuleset
+from repo2xml.services.scan.gitignore import GitignoreEngine, _normalize_gitignore_line
 
 
 class TestNormalizeGitignoreLine:
@@ -56,29 +58,36 @@ class TestGitignoreEngine:
         assert ruleset is not None
         assert ruleset.base_dir_rel == ""
         assert ruleset.base_prefix == ""
-        assert len(ruleset.patterns) == 2  # two patterns
+        assert len(ruleset.patterns) == 2
 
-    def test_load_dir_ruleset_caching(self, engine: GitignoreEngine, tmp_path: Path) -> None:
+    def test_load_dir_ruleset_caching_with_mtime(self, engine: GitignoreEngine, tmp_path: Path) -> None:
         gitignore = tmp_path / ".gitignore"
-        gitignore.write_text("*.tmp", encoding="utf-8")
+        gitignore.write_text("*.tmp\n", encoding="utf-8")
         # First call loads and caches
         ruleset1 = engine.load_dir_ruleset(dir_abs=tmp_path, dir_rel_posix="")
-        # Second call returns cached tuple
-        ruleset2 = engine.load_dir_ruleset(dir_abs=tmp_path, dir_rel_posix="")
         assert ruleset1 is not None
+
+        # Second call returns cached tuple (same patterns)
+        ruleset2 = engine.load_dir_ruleset(dir_abs=tmp_path, dir_rel_posix="")
         assert ruleset2 is not None
-        # The patterns tuple is the same object? Not necessarily, but cache ensures no reload.
-        # We can check that the cache size increased? Not exposed.
-        # We trust the implementation.
+        # They should be the same object (cached)
+        assert ruleset1.patterns is ruleset2.patterns
+
+        # Change the file and ensure mtime changes (sleep a bit if needed)
+        time.sleep(0.1)  # ensure mtime changes
+        gitignore.write_text("*.log\n", encoding="utf-8")
+        # Force mtime change
+        ruleset3 = engine.load_dir_ruleset(dir_abs=tmp_path, dir_rel_posix="")
+        assert ruleset3 is not None
+        # Patterns should be different (new file content)
+        assert ruleset1.patterns != ruleset3.patterns
 
     def test_is_ignored_basic(self, engine: GitignoreEngine, tmp_path: Path) -> None:
-        # Create a ruleset with a pattern
         gitignore = tmp_path / ".gitignore"
         gitignore.write_text("*.log\n", encoding="utf-8")
         ruleset = engine.load_dir_ruleset(dir_abs=tmp_path, dir_rel_posix="")
         assert ruleset is not None
         stack = [engine.base_ruleset(), ruleset]
-        # Check ignoring
         assert engine.is_ignored(rel_path_posix="file.log", is_dir=False, stack=stack) is True
         assert engine.is_ignored(rel_path_posix="file.txt", is_dir=False, stack=stack) is False
 
@@ -97,18 +106,13 @@ class TestGitignoreEngine:
         ruleset = engine.load_dir_ruleset(dir_abs=tmp_path, dir_rel_posix="")
         assert ruleset is not None
         stack = [engine.base_ruleset(), ruleset]
-        # Directory pattern matches both files inside /temp and also the directory itself?
-        # For is_dir=True we test both forms.
         assert engine.is_ignored(rel_path_posix="temp/file.txt", is_dir=False, stack=stack) is True
-        # For a directory entry itself (not a file), we also test with trailing slash.
         assert engine.is_ignored(rel_path_posix="temp", is_dir=True, stack=stack) is True
 
     def test_is_ignored_scoped_rules(self, engine: GitignoreEngine, tmp_path: Path) -> None:
-        # Root .gitignore: *.log
         root_git = tmp_path / ".gitignore"
         root_git.write_text("*.log\n", encoding="utf-8")
         root_ruleset = engine.load_dir_ruleset(dir_abs=tmp_path, dir_rel_posix="")
-        # Subdir .gitignore: !important.log
         subdir = tmp_path / "sub"
         subdir.mkdir()
         sub_git = subdir / ".gitignore"
@@ -117,11 +121,8 @@ class TestGitignoreEngine:
         assert root_ruleset is not None
         assert sub_ruleset is not None
         stack = [engine.base_ruleset(), root_ruleset, sub_ruleset]
-        # In subdir, important.log should be included (negation overrides root)
         assert engine.is_ignored(rel_path_posix="sub/important.log", is_dir=False, stack=stack) is False
-        # Other .log files in subdir should be ignored
         assert engine.is_ignored(rel_path_posix="sub/other.log", is_dir=False, stack=stack) is True
-        # In root, a .log file should be ignored
         root_stack = [engine.base_ruleset(), root_ruleset]
         assert engine.is_ignored(rel_path_posix="root.log", is_dir=False, stack=root_stack) is True
 
@@ -131,6 +132,5 @@ class TestGitignoreEngine:
         ruleset = engine.load_dir_ruleset(dir_abs=tmp_path, dir_rel_posix="")
         assert ruleset is not None
         stack = [engine.base_ruleset(), ruleset]
-        # The last pattern wins: foo.txt should be included.
         assert engine.is_ignored(rel_path_posix="foo.txt", is_dir=False, stack=stack) is False
         assert engine.is_ignored(rel_path_posix="bar.txt", is_dir=False, stack=stack) is True

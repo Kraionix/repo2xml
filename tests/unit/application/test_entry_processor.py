@@ -2,7 +2,7 @@
 """Unit tests for EntryProcessor."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -18,13 +18,12 @@ from repo2xml.config import (
     TextHandlingConfig,
     TokenCountConfig,
 )
+from repo2xml.contracts import IngestorLike
 from repo2xml.domain.model import (
     ClassificationResult,
     ErrorCode,
-    ErrorPayload,
     FileEntry,
     SkipCode,
-    SkippedPayload,
     TextPayload,
 )
 
@@ -49,9 +48,15 @@ class TestEntryProcessor:
 
     @pytest.fixture
     def mock_ingestor(self) -> MagicMock:
-        m = MagicMock()
+        m = MagicMock(spec=IngestorLike)
         # Simulate successful text read
-        m.read_text.return_value = MagicMock(kind="text", text="content", encoding="utf-8")
+        read_result = MagicMock()
+        read_result.kind = "text"
+        read_result.text = "content"
+        read_result.encoding = "utf-8"
+        read_result.skipped = None
+        read_result.error = None
+        m.read_text.return_value = read_result
         return m
 
     @pytest.fixture
@@ -136,7 +141,6 @@ class TestEntryProcessor:
 
     def test_process_binary_skip(self, config, mock_classifier, mock_ingestor, entry) -> None:
         mock_classifier.classify.return_value = ClassificationResult(kind="binary")
-        # The processor uses ExportPayloadBuilder internally, which will skip binary.
         processor = EntryProcessor(
             config=config,
             ingestor=mock_ingestor,
@@ -150,10 +154,11 @@ class TestEntryProcessor:
 
     def test_process_text_size_limit(self, config, mock_classifier, mock_ingestor, entry) -> None:
         # Simulate ingestor returning skip
-        mock_ingestor.read_text.return_value = MagicMock(
-            kind="skip",
-            skipped=MagicMock(code=SkipCode.text_size_limit, detail={})
-        )
+        read_result = MagicMock()
+        read_result.kind = "skip"
+        read_result.skipped = MagicMock(code=SkipCode.text_size_limit, detail={})
+        mock_ingestor.read_text.return_value = read_result
+
         processor = EntryProcessor(
             config=config,
             ingestor=mock_ingestor,
@@ -166,10 +171,11 @@ class TestEntryProcessor:
         assert result.skip_code == SkipCode.text_size_limit.value
 
     def test_process_text_read_error(self, config, mock_classifier, mock_ingestor, entry) -> None:
-        mock_ingestor.read_text.return_value = MagicMock(
-            kind="error",
-            error=MagicMock(code=ErrorCode.text_read_error, detail={})
-        )
+        read_result = MagicMock()
+        read_result.kind = "error"
+        read_result.error = MagicMock(code=ErrorCode.text_read_error, detail={})
+        mock_ingestor.read_text.return_value = read_result
+
         processor = EntryProcessor(
             config=config,
             ingestor=mock_ingestor,
