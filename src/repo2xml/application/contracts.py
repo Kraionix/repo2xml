@@ -17,7 +17,7 @@ from repo2xml.domain.model import (
     TokenStats,
 )
 from repo2xml.services.scan.gitignore import IgnoreRuleset
-from repo2xml.services.serialize.base import WriteFn   # добавлен импорт
+from repo2xml.services.serialize.base import WriteFn
 
 
 # ----------------------------------------------------------------------
@@ -58,7 +58,7 @@ class ProgressReporter(Protocol):
 
 
 # ----------------------------------------------------------------------
-# Token counting contracts (new)
+# Token counting contracts
 # ----------------------------------------------------------------------
 
 class TokenCounter(Protocol):
@@ -81,62 +81,68 @@ class TokenCounterFactory(ABC):
 
 
 # ----------------------------------------------------------------------
-# Serialiser / Deserialiser abstractions (format-agnostic)
+# Serialiser / Deserialiser abstractions (ISP-refactored)
 # ----------------------------------------------------------------------
 
-class Serializer(ABC):
-    """Abstract serialiser for a specific format.
-
-    Subclasses MUST implement all write_* methods for every FilePayload
-    variant.  If a format does not support a particular payload, the
-    implementation should raise UnsupportedPayloadError.
-    """
+class DocumentMetadataWriter(ABC):
+    """Writes document-level metadata: header, footer, and statistics."""
 
     @abstractmethod
-    def write_header(self, meta: ExportMeta, write: WriteFn) -> None: ...
-    @abstractmethod
-    def write_footer(self, write: WriteFn) -> None: ...
-    @abstractmethod
-    def write_structure(self, entries: List[FileEntry], write: WriteFn) -> None: ...
-    @abstractmethod
-    def write_files_open(self, mode: str, write: WriteFn) -> None: ...
-    @abstractmethod
-    def write_files_close(self, write: WriteFn) -> None: ...
+    def write_header(self, meta: ExportMeta, write: WriteFn) -> None:
+        """Write the document header (version, root path, generation time)."""
+        ...
 
-    # Payload-specific methods (one per concrete payload type)
     @abstractmethod
-    def write_metadata(self, entry: FileEntry, payload: 'MetadataPayload', write: WriteFn, token_count: Optional[int] = None) -> None: ...
-    @abstractmethod
-    def write_text(self, entry: FileEntry, payload: 'TextPayload', write: WriteFn, token_count: Optional[int] = None) -> None: ...
-    @abstractmethod
-    def write_binary_base64(self, entry: FileEntry, payload: 'BinaryBase64Payload', write: WriteFn, token_count: Optional[int] = None) -> None: ...
-    @abstractmethod
-    def write_binary_hash(self, entry: FileEntry, payload: 'BinaryHashPayload', write: WriteFn, token_count: Optional[int] = None) -> None: ...
-    @abstractmethod
-    def write_link(self, entry: FileEntry, payload: 'LinkPayload', write: WriteFn, token_count: Optional[int] = None) -> None: ...
-    @abstractmethod
-    def write_skipped(self, entry: FileEntry, payload: 'SkippedPayload', write: WriteFn, token_count: Optional[int] = None) -> None: ...
-    @abstractmethod
-    def write_error(self, entry: FileEntry, payload: 'ErrorPayload', write: WriteFn, token_count: Optional[int] = None) -> None: ...
+    def write_footer(self, write: WriteFn) -> None:
+        """Write the document footer (closing tags)."""
+        ...
 
     @abstractmethod
     def write_statistics(self, token_stats: Optional[TokenStats], write: WriteFn) -> None:
-        """Write aggregated statistics (e.g., total tokens) after files section."""
+        """Write aggregated statistics (e.g., total tokens)."""
         ...
 
-    # New unified method for writing any file entry.
+
+class StructureWriter(ABC):
+    """Writes the project directory tree structure."""
+
+    @abstractmethod
+    def write_structure(self, entries: List[FileEntry], write: WriteFn) -> None:
+        """Write the hierarchical project structure."""
+        ...
+
+
+class FileSectionWriter(ABC):
+    """Opens and closes the section that contains file entries."""
+
+    @abstractmethod
+    def write_files_open(self, mode: str, write: WriteFn) -> None:
+        """Open the <files> section with the given mode attribute."""
+        ...
+
+    @abstractmethod
+    def write_files_close(self, write: WriteFn) -> None:
+        """Close the <files> section."""
+        ...
+
+
+class FileContentWriter(ABC):
+    """Writes a single file entry with its payload."""
+
     @abstractmethod
     def write_file(self, entry: FileEntry, payload: FilePayload, write: WriteFn, token_count: Optional[int] = None) -> None:
         """
-        Write a single file entry using the provided payload.
+        Write one file entry.
 
-        This method dispatches internally to the appropriate payload-specific
-        writer based on the actual type of `payload`. It is the only method
-        that higher-level components (e.g., PipelineOrchestrator) should call
-        for file entries.
+        The implementation must dispatch based on the actual payload type
+        (TextPayload, BinaryBase64Payload, LinkPayload, etc.).
         """
         ...
 
+
+# ----------------------------------------------------------------------
+# Deserializer (unchanged)
+# ----------------------------------------------------------------------
 
 class Deserializer(ABC):
     """Abstract deserialiser for a specific format."""
@@ -162,9 +168,14 @@ class FormatFactory(ABC):
     """Creates a Serializer / Deserializer pair for a given format."""
 
     @abstractmethod
-    def create_serializer(self, **kwargs) -> Serializer: ...
+    def create_serializer(self, **kwargs) -> DocumentMetadataWriter & StructureWriter & FileSectionWriter & FileContentWriter:
+        """Create a serializer instance implementing all four writer interfaces."""
+        ...
+
     @abstractmethod
-    def create_deserializer(self, **kwargs) -> Deserializer: ...
+    def create_deserializer(self, **kwargs) -> Deserializer:
+        """Create a deserializer instance."""
+        ...
 
     @classmethod
     def supported_payload_types(cls) -> Set[Type[FilePayload]]:

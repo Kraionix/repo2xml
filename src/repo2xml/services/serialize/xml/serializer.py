@@ -5,7 +5,12 @@ import html
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-from repo2xml.application.contracts import Serializer
+from repo2xml.application.contracts import (
+    DocumentMetadataWriter,
+    FileContentWriter,
+    FileSectionWriter,
+    StructureWriter,
+)
 from repo2xml.domain.constants import SCHEMA_VERSION
 from repo2xml.domain.model import (
     BinaryBase64Payload,
@@ -31,7 +36,12 @@ from repo2xml.services.serialize.xml_utils import (
 )
 
 
-class XMLSerializer(Serializer):
+class XMLSerializer(
+    DocumentMetadataWriter,
+    StructureWriter,
+    FileSectionWriter,
+    FileContentWriter,
+):
     def __init__(
         self,
         *,
@@ -80,7 +90,7 @@ class XMLSerializer(Serializer):
         write(f"{indent_str}<{XmlFormatSpec.TAG_DETAIL}>{cdata(json_detail(detail))}</{XmlFormatSpec.TAG_DETAIL}>{self.nl}")
 
     # ------------------------------------------------------------------
-    # High-level structure
+    # DocumentMetadataWriter implementation
     # ------------------------------------------------------------------
 
     def write_header(self, meta: ExportMeta, write: WriteFn) -> None:
@@ -105,6 +115,16 @@ class XMLSerializer(Serializer):
 
     def write_footer(self, write: WriteFn) -> None:
         write(f"{self.indent(0)}</{XmlFormatSpec.TAG_ROOT}>{self.nl}")
+
+    def write_statistics(self, token_stats: Optional[TokenStats], write: WriteFn) -> None:
+        """Write aggregated statistics (only if token_stats is provided and total_tokens > 0)."""
+        if token_stats is None or token_stats.total_tokens == 0:
+            return
+        write(f'{self.indent(1)}<{XmlFormatSpec.TAG_STATISTICS} {XmlFormatSpec.ATTR_TOTAL_TOKENS}="{token_stats.total_tokens}" />{self.nl}')
+
+    # ------------------------------------------------------------------
+    # StructureWriter implementation
+    # ------------------------------------------------------------------
 
     def write_structure(self, entries: List[FileEntry], write: WriteFn) -> None:
         nl = self.nl
@@ -144,6 +164,10 @@ class XMLSerializer(Serializer):
         close_to(0)
         write(f"{self.indent(1)}</{XmlFormatSpec.TAG_PROJECT_STRUCTURE}>{nl}")
 
+    # ------------------------------------------------------------------
+    # FileSectionWriter implementation
+    # ------------------------------------------------------------------
+
     def write_files_open(self, mode: str, write: WriteFn) -> None:
         write(f'{self.indent(1)}<{XmlFormatSpec.TAG_FILES} {XmlFormatSpec.ATTR_MODE}="{esc_attr(mode)}">{self.nl}')
 
@@ -151,14 +175,14 @@ class XMLSerializer(Serializer):
         write(f"{self.indent(1)}</{XmlFormatSpec.TAG_FILES}>{self.nl}")
 
     # ------------------------------------------------------------------
-    # Payload writers (one per type)
+    # Private payload writers (formerly public)
     # ------------------------------------------------------------------
 
-    def write_metadata(self, entry: FileEntry, payload: MetadataPayload, write: WriteFn, token_count: Optional[int] = None) -> None:
+    def _write_metadata(self, entry: FileEntry, payload: MetadataPayload, write: WriteFn, token_count: Optional[int] = None) -> None:
         attrs = self._file_attr_str(entry)
         write(f'{self.indent(2)}<{XmlFormatSpec.TAG_FILE} {attrs} />{self.nl}')
 
-    def write_text(self, entry: FileEntry, payload: TextPayload, write: WriteFn, token_count: Optional[int] = None) -> None:
+    def _write_text(self, entry: FileEntry, payload: TextPayload, write: WriteFn, token_count: Optional[int] = None) -> None:
         nl = self.nl
         i2 = self.indent(2)
         i3 = self.indent(3)
@@ -174,7 +198,7 @@ class XMLSerializer(Serializer):
         write(f"{i3}<{XmlFormatSpec.TAG_CONTENT}{''.join(content_attrs)}>{cdata(payload.text)}</{XmlFormatSpec.TAG_CONTENT}>{nl}")
         write(f"{i2}</{XmlFormatSpec.TAG_FILE}>{nl}")
 
-    def write_binary_base64(self, entry: FileEntry, payload: BinaryBase64Payload, write: WriteFn, token_count: Optional[int] = None) -> None:
+    def _write_binary_base64(self, entry: FileEntry, payload: BinaryBase64Payload, write: WriteFn, token_count: Optional[int] = None) -> None:
         nl = self.nl
         i2 = self.indent(2)
         i3 = self.indent(3)
@@ -186,7 +210,7 @@ class XMLSerializer(Serializer):
         write(f"</{XmlFormatSpec.TAG_CONTENT}>{nl}")
         write(f"{i2}</{XmlFormatSpec.TAG_FILE}>{nl}")
 
-    def write_binary_hash(self, entry: FileEntry, payload: BinaryHashPayload, write: WriteFn, token_count: Optional[int] = None) -> None:
+    def _write_binary_hash(self, entry: FileEntry, payload: BinaryHashPayload, write: WriteFn, token_count: Optional[int] = None) -> None:
         nl = self.nl
         i2 = self.indent(2)
         i3 = self.indent(3)
@@ -195,11 +219,11 @@ class XMLSerializer(Serializer):
         write(f'{i3}<{XmlFormatSpec.TAG_CONTENT} {XmlFormatSpec.ATTR_ENCODING}="sha256">{html.escape(payload.sha256_hex)}</{XmlFormatSpec.TAG_CONTENT}>{nl}')
         write(f"{i2}</{XmlFormatSpec.TAG_FILE}>{nl}")
 
-    def write_link(self, entry: FileEntry, payload: LinkPayload, write: WriteFn, token_count: Optional[int] = None) -> None:
+    def _write_link(self, entry: FileEntry, payload: LinkPayload, write: WriteFn, token_count: Optional[int] = None) -> None:
         attrs = self._file_attr_str(entry, link_target_override=payload.link_target)
         write(f'{self.indent(2)}<{XmlFormatSpec.TAG_FILE} {attrs} {XmlFormatSpec.ATTR_LINK_ONLY}="true" />{self.nl}')
 
-    def write_skipped(self, entry: FileEntry, payload: SkippedPayload, write: WriteFn, token_count: Optional[int] = None) -> None:
+    def _write_skipped(self, entry: FileEntry, payload: SkippedPayload, write: WriteFn, token_count: Optional[int] = None) -> None:
         nl = self.nl
         i2 = self.indent(2)
         i3 = self.indent(3)
@@ -209,7 +233,7 @@ class XMLSerializer(Serializer):
         self._write_detail_if_any(payload.detail, indent_str=i3, write=write)
         write(f"{i2}</{XmlFormatSpec.TAG_FILE}>{nl}")
 
-    def write_error(self, entry: FileEntry, payload: ErrorPayload, write: WriteFn, token_count: Optional[int] = None) -> None:
+    def _write_error(self, entry: FileEntry, payload: ErrorPayload, write: WriteFn, token_count: Optional[int] = None) -> None:
         nl = self.nl
         i2 = self.indent(2)
         i3 = self.indent(3)
@@ -220,38 +244,26 @@ class XMLSerializer(Serializer):
         write(f"{i2}</{XmlFormatSpec.TAG_FILE}>{nl}")
 
     # ------------------------------------------------------------------
-    # Statistics
-    # ------------------------------------------------------------------
-
-    def write_statistics(self, token_stats: Optional[TokenStats], write: WriteFn) -> None:
-        """Write aggregated statistics (only if token_stats is provided and total_tokens > 0)."""
-        if token_stats is None or token_stats.total_tokens == 0:
-            return
-        write(f'{self.indent(1)}<{XmlFormatSpec.TAG_STATISTICS} {XmlFormatSpec.ATTR_TOTAL_TOKENS}="{token_stats.total_tokens}" />{self.nl}')
-
-    # ------------------------------------------------------------------
-    # New unified write_file method
+    # FileContentWriter implementation
     # ------------------------------------------------------------------
 
     def write_file(self, entry: FileEntry, payload: FilePayload, write: WriteFn, token_count: Optional[int] = None) -> None:
         """
-        Write a single file entry by dispatching to the appropriate payload-specific writer.
-
-        This method replaces the old dispatch logic that was previously in ExportPipeline.
+        Write a single file entry by dispatching to the appropriate private writer.
         """
         if isinstance(payload, MetadataPayload):
-            self.write_metadata(entry, payload, write, token_count)
+            self._write_metadata(entry, payload, write, token_count)
         elif isinstance(payload, TextPayload):
-            self.write_text(entry, payload, write, token_count)
+            self._write_text(entry, payload, write, token_count)
         elif isinstance(payload, BinaryBase64Payload):
-            self.write_binary_base64(entry, payload, write, token_count)
+            self._write_binary_base64(entry, payload, write, token_count)
         elif isinstance(payload, BinaryHashPayload):
-            self.write_binary_hash(entry, payload, write, token_count)
+            self._write_binary_hash(entry, payload, write, token_count)
         elif isinstance(payload, LinkPayload):
-            self.write_link(entry, payload, write, token_count)
+            self._write_link(entry, payload, write, token_count)
         elif isinstance(payload, SkippedPayload):
-            self.write_skipped(entry, payload, write, token_count)
+            self._write_skipped(entry, payload, write, token_count)
         elif isinstance(payload, ErrorPayload):
-            self.write_error(entry, payload, write, token_count)
+            self._write_error(entry, payload, write, token_count)
         else:
             raise AssertionError(f"Unhandled payload type: {type(payload)}")

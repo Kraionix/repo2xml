@@ -213,7 +213,10 @@ class RepoXML:
 
         # --- Writer coordinator ---
         writer_coordinator = WriterCoordinator(
-            serializer=serializer,
+            metadata_writer=serializer,
+            structure_writer=serializer,
+            section_writer=serializer,
+            content_writer=serializer,
             output_target=output_target,
             buffer_chars=config.output.write_buffer_chars,
         )

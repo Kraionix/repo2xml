@@ -6,7 +6,12 @@ import logging
 from contextlib import contextmanager
 from typing import BinaryIO, List, Optional
 
-from repo2xml.application.contracts import Serializer
+from repo2xml.application.contracts import (
+    DocumentMetadataWriter,
+    FileContentWriter,
+    FileSectionWriter,
+    StructureWriter,
+)
 from repo2xml.application.writer import BufferedTextWriter
 from repo2xml.domain.model import ExportMeta, FileEntry, FilePayload, TokenStats
 from repo2xml.services.output.targets import OutputTarget
@@ -17,7 +22,7 @@ logger = logging.getLogger("repo2xml.writer_coordinator")
 
 class WriterCoordinator:
     """
-    Coordinates buffered writing through a Serializer.
+    Coordinates buffered writing through four separate writer components.
 
     Manages the output stream, buffer, and provides high-level methods
     for writing header, structure, files, statistics, and footer.
@@ -26,12 +31,18 @@ class WriterCoordinator:
 
     def __init__(
         self,
-        serializer: Serializer,
+        metadata_writer: DocumentMetadataWriter,
+        structure_writer: StructureWriter,
+        section_writer: FileSectionWriter,
+        content_writer: FileContentWriter,
         output_target: OutputTarget,
         *,
         buffer_chars: int = 64_000,
     ):
-        self.serializer = serializer
+        self._metadata_writer = metadata_writer
+        self._structure_writer = structure_writer
+        self._section_writer = section_writer
+        self._content_writer = content_writer
         self.output_target = output_target
         self.buffer_chars = buffer_chars
 
@@ -57,63 +68,63 @@ class WriterCoordinator:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-            try:
-                self._buffered_writer.flush()
-                self._text_wrapper.flush()
-                self._text_wrapper.detach()
-            except Exception as e:
-                logger.error("Error during writer cleanup: %s", e)
-            finally:
-                self._stream = None
-                self._text_wrapper = None
-                self._buffered_writer = None
-                self._write_fn = None
+        try:
+            self._buffered_writer.flush()
+            self._text_wrapper.flush()
+            self._text_wrapper.detach()
+        except Exception as e:
+            logger.error("Error during writer cleanup: %s", e)
+        finally:
+            self._stream = None
+            self._text_wrapper = None
+            self._buffered_writer = None
+            self._write_fn = None
 
     # ------------------------------------------------------------------
     # High-level writing methods
     # ------------------------------------------------------------------
 
     def write_header(self, meta: ExportMeta) -> None:
-        """Write the document header via the serializer."""
+        """Write the document header via the metadata writer."""
         if self._write_fn is None:
             raise RuntimeError("WriterCoordinator not opened; use 'with' context")
-        self.serializer.write_header(meta, self._write_fn)
+        self._metadata_writer.write_header(meta, self._write_fn)
 
     def write_structure(self, entries: List[FileEntry]) -> None:
-        """Write the project structure via the serializer."""
+        """Write the project structure via the structure writer."""
         if self._write_fn is None:
             raise RuntimeError("WriterCoordinator not opened; use 'with' context")
-        self.serializer.write_structure(entries, self._write_fn)
+        self._structure_writer.write_structure(entries, self._write_fn)
 
     def write_files_open(self, mode: str) -> None:
-        """Open the <files> section."""
+        """Open the <files> section via the section writer."""
         if self._write_fn is None:
             raise RuntimeError("WriterCoordinator not opened; use 'with' context")
-        self.serializer.write_files_open(mode, self._write_fn)
+        self._section_writer.write_files_open(mode, self._write_fn)
 
     def write_file(self, entry: FileEntry, payload: FilePayload, token_count: Optional[int] = None) -> None:
-        """Write a single file entry via the serializer's unified write_file."""
+        """Write a single file entry via the content writer."""
         if self._write_fn is None:
             raise RuntimeError("WriterCoordinator not opened; use 'with' context")
-        self.serializer.write_file(entry, payload, self._write_fn, token_count)
+        self._content_writer.write_file(entry, payload, self._write_fn, token_count)
 
     def write_statistics(self, token_stats: Optional[TokenStats]) -> None:
-        """Write aggregated statistics (if any)."""
+        """Write aggregated statistics (if any) via the metadata writer."""
         if self._write_fn is None:
             raise RuntimeError("WriterCoordinator not opened; use 'with' context")
-        self.serializer.write_statistics(token_stats, self._write_fn)
+        self._metadata_writer.write_statistics(token_stats, self._write_fn)
 
     def write_footer(self) -> None:
-        """Write the document footer."""
+        """Write the document footer via the metadata writer."""
         if self._write_fn is None:
             raise RuntimeError("WriterCoordinator not opened; use 'with' context")
-        self.serializer.write_footer(self._write_fn)
+        self._metadata_writer.write_footer(self._write_fn)
 
     def write_files_close(self) -> None:
-        """Close the <files> section."""
+        """Close the <files> section via the section writer."""
         if self._write_fn is None:
             raise RuntimeError("WriterCoordinator not opened; use 'with' context")
-        self.serializer.write_files_close(self._write_fn)
+        self._section_writer.write_files_close(self._write_fn)
 
     # ------------------------------------------------------------------
     # Manual flush and close (for graceful interruption)
