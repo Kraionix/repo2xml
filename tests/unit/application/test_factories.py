@@ -16,10 +16,18 @@ from repo2xml.config import (
     OutputFormatConfig,
     RedactConfig,
     ScanConfig,
+    SymlinkFilesMode,
     TextHandlingConfig,
     TokenCountConfig,
 )
 from repo2xml.services.output.targets import OutputTarget
+from repo2xml.services.policies import (
+    BinaryPolicy,
+    ErrorPolicy,
+    ModePolicy,
+    SymlinkPolicy,
+    TextPolicy,
+)
 
 
 class TestExportComponentFactory:
@@ -147,7 +155,6 @@ class TestExportComponentFactory:
             payload_builder=ANY,
         )
 
-        # Check that StatisticsCollector received providers list
         mock_stats_collector.assert_called_once_with(
             token_counting_enabled=False,
             providers=[mock_classification_engine.return_value],
@@ -220,7 +227,6 @@ class TestExportComponentFactory:
             payload_builder=ANY,
         )
 
-        # StatisticsCollector should receive both classification and redaction as providers
         mock_stats_collector.assert_called_once_with(
             token_counting_enabled=True,
             providers=[mock_classification_engine.return_value, mock_redaction_engine.return_value],
@@ -261,3 +267,62 @@ class TestExportComponentFactory:
         mock_orchestrator_cls.assert_called_once()
         call_kwargs = mock_orchestrator_cls.call_args[1]
         assert call_kwargs["progress_reporter"] == mock_null_reporter.return_value
+
+    # ---- New tests for _build_policies ----
+
+    def test_build_policies_full_mode(self, config, tmp_path) -> None:
+        config.mode = Mode.full
+        config.scan.symlinks_files = SymlinkFilesMode.follow
+        factory = ExportComponentFactory(config, tmp_path, MagicMock())
+        ingestor = MagicMock()
+        policies = factory._build_policies(config, ingestor)
+
+        assert len(policies) == 3
+        assert isinstance(policies[0], ErrorPolicy)
+        assert isinstance(policies[1], BinaryPolicy)
+        assert isinstance(policies[2], TextPolicy)
+
+    def test_build_policies_full_mode_with_symlink_as_link(self, config, tmp_path) -> None:
+        config.mode = Mode.full
+        config.scan.symlinks_files = SymlinkFilesMode.as_link
+        factory = ExportComponentFactory(config, tmp_path, MagicMock())
+        ingestor = MagicMock()
+        policies = factory._build_policies(config, ingestor)
+
+        assert len(policies) == 4
+        assert isinstance(policies[0], SymlinkPolicy)
+        assert isinstance(policies[1], ErrorPolicy)
+        assert isinstance(policies[2], BinaryPolicy)
+        assert isinstance(policies[3], TextPolicy)
+
+    def test_build_policies_full_mode_with_symlink_skip(self, config, tmp_path) -> None:
+        config.mode = Mode.full
+        config.scan.symlinks_files = SymlinkFilesMode.skip
+        factory = ExportComponentFactory(config, tmp_path, MagicMock())
+        ingestor = MagicMock()
+        policies = factory._build_policies(config, ingestor)
+
+        assert len(policies) == 4
+        assert isinstance(policies[0], SymlinkPolicy)
+        assert isinstance(policies[1], ErrorPolicy)
+        assert isinstance(policies[2], BinaryPolicy)
+        assert isinstance(policies[3], TextPolicy)
+
+    def test_build_policies_metadata_mode(self, config, tmp_path) -> None:
+        config.mode = Mode.metadata
+        factory = ExportComponentFactory(config, tmp_path, MagicMock())
+        ingestor = MagicMock()
+        policies = factory._build_policies(config, ingestor)
+
+        assert len(policies) == 1
+        assert isinstance(policies[0], ModePolicy)
+
+    def test_build_policies_structure_mode(self, config, tmp_path) -> None:
+        config.mode = Mode.structure
+        factory = ExportComponentFactory(config, tmp_path, MagicMock())
+        ingestor = MagicMock()
+        policies = factory._build_policies(config, ingestor)
+
+        # Structure mode is not handled specially, so it behaves like full
+        assert len(policies) == 3
+        assert not isinstance(policies[0], ModePolicy)
