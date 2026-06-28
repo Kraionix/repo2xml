@@ -76,7 +76,6 @@ class TestXMLSerializer:
         output = self._collect_output(lambda w: serializer.write_structure(entries, w))
         assert "<project_structure>" in output
         assert '<file name="file.txt" path="file.txt"' in output
-        # Structure does not include size or mtime
         assert 'size="1024"' not in output
         assert 'mtime_utc' not in output
         assert "/>" in output
@@ -89,7 +88,7 @@ class TestXMLSerializer:
 
     def test_write_metadata(self, serializer: XMLSerializer, sample_entry: FileEntry) -> None:
         payload = MetadataPayload()
-        output = self._collect_output(lambda w: serializer.write_metadata(sample_entry, payload, w))
+        output = self._collect_output(lambda w: serializer.write_file(sample_entry, payload, w))
         assert '<file path="file.txt"' in output
         assert 'ext=".txt"' in output
         assert 'size="1024"' in output
@@ -99,7 +98,7 @@ class TestXMLSerializer:
 
     def test_write_text(self, serializer: XMLSerializer, sample_entry: FileEntry) -> None:
         payload = TextPayload(text="Hello, world!", encoding="utf-8")
-        output = self._collect_output(lambda w: serializer.write_text(sample_entry, payload, w, token_count=42))
+        output = self._collect_output(lambda w: serializer.write_file(sample_entry, payload, w, token_count=42))
         assert '<file path="file.txt"' in output
         assert 'tokens="42"' in output
         assert '<content encoding="utf-8" decode_errors="replace">' in output
@@ -107,19 +106,18 @@ class TestXMLSerializer:
 
     def test_write_binary_base64(self, serializer: XMLSerializer, sample_entry: FileEntry) -> None:
         payload = BinaryBase64Payload(chunks=["YWJj", "ZGVm"])
-        output = self._collect_output(lambda w: serializer.write_binary_base64(sample_entry, payload, w))
+        output = self._collect_output(lambda w: serializer.write_file(sample_entry, payload, w))
         assert 'binary="true"' in output
         assert '<content encoding="base64">' in output
-        assert "YWJjZGVm" in output  # concatenated chunks
+        assert "YWJjZGVm" in output
 
     def test_write_binary_hash(self, serializer: XMLSerializer, sample_entry: FileEntry) -> None:
         payload = BinaryHashPayload(sha256_hex="abc123")
-        output = self._collect_output(lambda w: serializer.write_binary_hash(sample_entry, payload, w))
+        output = self._collect_output(lambda w: serializer.write_file(sample_entry, payload, w))
         assert 'binary="true"' in output
         assert '<content encoding="sha256">abc123</content>' in output
 
     def test_write_link(self, serializer: XMLSerializer) -> None:
-        # Use a symlink entry so that link_target is emitted
         sym_entry = FileEntry(
             abs_path=Path("/repo/link"),
             rel_path="link",
@@ -130,13 +128,13 @@ class TestXMLSerializer:
             symlink_target="/some/target",
         )
         payload = LinkPayload(link_target="/some/target")
-        output = self._collect_output(lambda w: serializer.write_link(sym_entry, payload, w))
+        output = self._collect_output(lambda w: serializer.write_file(sym_entry, payload, w))
         assert 'link_only="true"' in output
         assert 'link_target="/some/target"' in output
 
     def test_write_skipped(self, serializer: XMLSerializer, sample_entry: FileEntry) -> None:
         payload = SkippedPayload(code=SkipCode.text_size_limit, message="Too large", detail={"size": 2000})
-        output = self._collect_output(lambda w: serializer.write_skipped(sample_entry, payload, w))
+        output = self._collect_output(lambda w: serializer.write_file(sample_entry, payload, w))
         assert 'skipped="true"' in output
         assert 'skip_code="text_size_limit"' in output
         assert "<error>Too large</error>" in output
@@ -144,7 +142,7 @@ class TestXMLSerializer:
 
     def test_write_error(self, serializer: XMLSerializer, sample_entry: FileEntry) -> None:
         payload = ErrorPayload(code=ErrorCode.text_read_error, message="Read failed", detail={"os_error": "permission"})
-        output = self._collect_output(lambda w: serializer.write_error(sample_entry, payload, w))
+        output = self._collect_output(lambda w: serializer.write_file(sample_entry, payload, w))
         assert 'skipped="true"' in output
         assert 'error_code="text_read_error"' in output
         assert "<error>Read failed</error>" in output
@@ -189,7 +187,7 @@ class TestXMLSerializer:
             is_symlink=False,
         )
         payload = MetadataPayload()
-        output = self._collect_output(lambda w: serializer.write_metadata(entry, payload, w))
+        output = self._collect_output(lambda w: serializer.write_file(entry, payload, w))
         assert 'mtime_utc' not in output
 
     def test_no_size(self) -> None:
@@ -203,13 +201,13 @@ class TestXMLSerializer:
             is_symlink=False,
         )
         payload = MetadataPayload()
-        output = self._collect_output(lambda w: serializer.write_metadata(entry, payload, w))
+        output = self._collect_output(lambda w: serializer.write_file(entry, payload, w))
         assert 'size' not in output
 
     def test_text_without_encoding(self) -> None:
         serializer = XMLSerializer()
         entry = FileEntry(abs_path=Path("/a"), rel_path="a", name="a", size=0, mtime_ns=0, is_symlink=False)
         payload = TextPayload(text="hello", encoding=None)
-        output = self._collect_output(lambda w: serializer.write_text(entry, payload, w))
+        output = self._collect_output(lambda w: serializer.write_file(entry, payload, w))
         assert '<content decode_errors="replace">' in output
         assert 'encoding' not in output

@@ -150,7 +150,6 @@ class TestPipelineOrchestrator:
 
         mock_processor.process.side_effect = process_side_effect
         orchestrator.execute()
-        # Two files → two error records
         mock_stats.record_error.assert_has_calls(
             [call("stat_error", "stat failed"), call("stat_error", "stat failed")]
         )
@@ -188,11 +187,9 @@ class TestPipelineOrchestrator:
         mock_writer.write_footer.assert_not_called()
 
     def test_execute_scan_warnings(self, orchestrator, mock_scanner, mock_stats) -> None:
-        # Create a mock stats object with all attributes used in the sum
         stats = MagicMock()
         stats.has_issues.return_value = True
         stats.summary.return_value = "some warnings"
-        # Set all attributes that are accessed via getattr to 0 or 1
         stats.dirs_scandir_errors = 1
         stats.entry_is_symlink_errors = 0
         stats.entry_is_dir_errors = 0
@@ -203,12 +200,12 @@ class TestPipelineOrchestrator:
 
         orchestrator.execute()
         orchestrator.progress.set_warning_count.assert_called_once_with(1)
-        # There are two calls to get_export_stats inside execute (one for token stats, one final).
-        # We check that at least one call had the correct argument.
         mock_stats.get_export_stats.assert_called_with("some warnings")
 
     def test_keyboard_interrupt(self, orchestrator, mock_processor, mock_writer) -> None:
         mock_processor.process.side_effect = KeyboardInterrupt()
         with pytest.raises(KeyboardInterrupt):
             orchestrator.execute()
-        mock_writer.close.assert_called_once()
+        # The writer is closed automatically via context manager; we don't call .close() directly.
+        # Instead we check that __exit__ was called.
+        mock_writer.__exit__.assert_called()

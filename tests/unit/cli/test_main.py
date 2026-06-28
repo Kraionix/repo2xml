@@ -36,8 +36,7 @@ class TestCliMain:
         mock_setup_logging.return_value = MagicMock()
 
         result = runner.invoke(app, ["."])
-        # The command may exit with code 0 or 2 depending on environment.
-        # We just verify that execute_export was called.
+        assert result.exit_code == 0, f"Unexpected exit code: {result.exit_code}, output: {result.output}"
         assert mock_execute_export.called
 
     @patch("repo2xml.cli.main.setup_logging")
@@ -50,8 +49,7 @@ class TestCliMain:
         mock_setup_logging.return_value = MagicMock()
 
         result = runner.invoke(app, [".", "--output", "out.xml", "--redact-secrets"])
-        # We don't assert exit_code due to environment-specific issues with Typer testing.
-        # Instead verify that execute_export was called with correct arguments.
+        assert result.exit_code == 0, f"Unexpected exit code: {result.exit_code}, output: {result.output}"
         assert mock_execute_export.called
         call_kwargs = mock_execute_export.call_args[1]
         assert call_kwargs["output"] == Path("out.xml")
@@ -66,6 +64,7 @@ class TestCliMain:
         mock_setup_logging.return_value = MagicMock()
 
         result = runner.invoke(app, ["restore", "context.xml", "-o", "restored"])
+        assert result.exit_code == 0, f"Unexpected exit code: {result.exit_code}, output: {result.output}"
         assert mock_execute_restore.called
         mock_execute_restore.assert_called_once_with(
             console=mock_console.return_value,
@@ -87,6 +86,7 @@ class TestCliMain:
         mock_setup_logging.return_value = MagicMock()
 
         result = runner.invoke(app, ["restore", "context.xml", "--overwrite"])
+        assert result.exit_code == 0, f"Unexpected exit code: {result.exit_code}, output: {result.output}"
         assert mock_execute_restore.called
         call_kwargs = mock_execute_restore.call_args[1]
         assert call_kwargs["overwrite"] is True
