@@ -23,18 +23,23 @@ from repo2xml.config import (
     TextHandlingConfig,
     TokenCountConfig,
 )
+from repo2xml.contracts import FilePolicy
+from repo2xml.services.policies import SymlinkPolicy, ModePolicy, ErrorPolicy, BinaryPolicy, TextPolicy
 
 
 class TestStepFactory:
     @pytest.fixture
     def services(self) -> ProcessingServices:
-        services = ProcessingServices(
+        return ProcessingServices(
             classification_engine=MagicMock(),
             ingestor=MagicMock(),
         )
-        return services
 
-    def test_create_steps_full_no_optional(self, services: ProcessingServices) -> None:
+    @pytest.fixture
+    def ingestor(self) -> MagicMock:
+        return MagicMock()
+
+    def test_create_steps_full_no_optional(self, services: ProcessingServices, ingestor: MagicMock) -> None:
         config = ExportConfig(
             mode=Mode.full,
             scan=ScanConfig(symlinks_files=SymlinkFilesMode.follow),
@@ -43,7 +48,13 @@ class TestStepFactory:
             redact=RedactConfig(enabled=False),
             token=TokenCountConfig(enabled=False),
         )
-        factory = StepFactory(config, services)
+        # Build policy list for full mode with symlink follow (no SymlinkPolicy)
+        policies: list[FilePolicy] = [
+            ErrorPolicy(),
+            BinaryPolicy(config.binary, ingestor),
+            TextPolicy(config.text, ingestor),
+        ]
+        factory = StepFactory(config, services, policies)
         steps = factory.create_steps()
 
         # Expect ClassifyStep and BuildPayloadStep only
@@ -51,7 +62,7 @@ class TestStepFactory:
         assert isinstance(steps[0], ClassifyStep)
         assert isinstance(steps[1], BuildPayloadStep)
 
-    def test_create_steps_with_redaction(self, services: ProcessingServices) -> None:
+    def test_create_steps_with_redaction(self, services: ProcessingServices, ingestor: MagicMock) -> None:
         config = ExportConfig(
             mode=Mode.full,
             scan=ScanConfig(symlinks_files=SymlinkFilesMode.follow),
@@ -61,7 +72,12 @@ class TestStepFactory:
             token=TokenCountConfig(enabled=False),
         )
         services.redaction_engine = MagicMock()
-        factory = StepFactory(config, services)
+        policies: list[FilePolicy] = [
+            ErrorPolicy(),
+            BinaryPolicy(config.binary, ingestor),
+            TextPolicy(config.text, ingestor),
+        ]
+        factory = StepFactory(config, services, policies)
         steps = factory.create_steps()
 
         assert len(steps) == 3
@@ -69,7 +85,7 @@ class TestStepFactory:
         assert isinstance(steps[1], BuildPayloadStep)
         assert isinstance(steps[2], RedactStep)
 
-    def test_create_steps_with_token_counting(self, services: ProcessingServices) -> None:
+    def test_create_steps_with_token_counting(self, services: ProcessingServices, ingestor: MagicMock) -> None:
         config = ExportConfig(
             mode=Mode.full,
             scan=ScanConfig(symlinks_files=SymlinkFilesMode.follow),
@@ -79,7 +95,12 @@ class TestStepFactory:
             token=TokenCountConfig(enabled=True),
         )
         services.token_counter = MagicMock()
-        factory = StepFactory(config, services)
+        policies: list[FilePolicy] = [
+            ErrorPolicy(),
+            BinaryPolicy(config.binary, ingestor),
+            TextPolicy(config.text, ingestor),
+        ]
+        factory = StepFactory(config, services, policies)
         steps = factory.create_steps()
 
         assert len(steps) == 3
@@ -87,7 +108,7 @@ class TestStepFactory:
         assert isinstance(steps[1], BuildPayloadStep)
         assert isinstance(steps[2], TokenCountStep)
 
-    def test_create_steps_with_both_optional(self, services: ProcessingServices) -> None:
+    def test_create_steps_with_both_optional(self, services: ProcessingServices, ingestor: MagicMock) -> None:
         config = ExportConfig(
             mode=Mode.full,
             scan=ScanConfig(symlinks_files=SymlinkFilesMode.follow),
@@ -98,7 +119,12 @@ class TestStepFactory:
         )
         services.redaction_engine = MagicMock()
         services.token_counter = MagicMock()
-        factory = StepFactory(config, services)
+        policies: list[FilePolicy] = [
+            ErrorPolicy(),
+            BinaryPolicy(config.binary, ingestor),
+            TextPolicy(config.text, ingestor),
+        ]
+        factory = StepFactory(config, services, policies)
         steps = factory.create_steps()
 
         assert len(steps) == 4
@@ -107,7 +133,7 @@ class TestStepFactory:
         assert isinstance(steps[2], RedactStep)
         assert isinstance(steps[3], TokenCountStep)
 
-    def test_create_steps_with_symlink_as_link(self, services: ProcessingServices) -> None:
+    def test_create_steps_with_symlink_as_link(self, services: ProcessingServices, ingestor: MagicMock) -> None:
         config = ExportConfig(
             mode=Mode.full,
             scan=ScanConfig(symlinks_files=SymlinkFilesMode.as_link),
@@ -116,13 +142,20 @@ class TestStepFactory:
             redact=RedactConfig(enabled=False),
             token=TokenCountConfig(enabled=False),
         )
-        factory = StepFactory(config, services)
+        policies: list[FilePolicy] = [
+            SymlinkPolicy(SymlinkFilesMode.as_link),
+            ErrorPolicy(),
+            BinaryPolicy(config.binary, ingestor),
+            TextPolicy(config.text, ingestor),
+        ]
+        factory = StepFactory(config, services, policies)
         steps = factory.create_steps()
-        # BuildPayloadStep handles symlink logic internally, so no separate symlink step.
+        # Still only two steps: ClassifyStep and BuildPayloadStep (which now uses policies)
         assert len(steps) == 2
+        assert isinstance(steps[0], ClassifyStep)
         assert isinstance(steps[1], BuildPayloadStep)
 
-    def test_create_steps_metadata_mode(self, services: ProcessingServices) -> None:
+    def test_create_steps_metadata_mode(self, services: ProcessingServices, ingestor: MagicMock) -> None:
         config = ExportConfig(
             mode=Mode.metadata,
             scan=ScanConfig(),
@@ -131,10 +164,11 @@ class TestStepFactory:
             redact=RedactConfig(enabled=False),
             token=TokenCountConfig(enabled=False),
         )
-        factory = StepFactory(config, services)
+        # In metadata mode, only ModePolicy is used.
+        policies: list[FilePolicy] = [ModePolicy(Mode.metadata)]
+        factory = StepFactory(config, services, policies)
         steps = factory.create_steps()
-        # Metadata mode: should still have ClassifyStep and BuildPayloadStep
-        # BuildPayloadStep handles metadata mode internally.
+        # Metadata mode: still ClassifyStep and BuildPayloadStep
         assert len(steps) == 2
         assert isinstance(steps[0], ClassifyStep)
         assert isinstance(steps[1], BuildPayloadStep)
