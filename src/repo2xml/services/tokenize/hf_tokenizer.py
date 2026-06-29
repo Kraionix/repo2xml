@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 
 from repo2xml.contracts import TokenCounter
 from repo2xml.domain.model import TokenStats
+from repo2xml.utils.logging_utils import temporary_logger_level
 
 logger = logging.getLogger("repo2xml.tokenizer")
 
@@ -51,9 +52,6 @@ class HuggingFaceTokenCounter(TokenCounter):
         self._min_tokens: Optional[int] = None
         self._errors = 0
 
-        # Suppress internal transformers warnings (e.g., missing token) after our own message.
-        logging.getLogger("transformers").setLevel(logging.WARNING)
-
     def _load_tokenizer(self) -> None:
         """
         Import transformers and load the tokenizer lazily.
@@ -73,45 +71,47 @@ class HuggingFaceTokenCounter(TokenCounter):
                 "Install with: pip install repo2xml[tokens]"
             ) from exc
 
-        # Attempt 1: load from local cache only.
-        try:
-            self._tokenizer = AutoTokenizer.from_pretrained(
-                self._model,
-                use_fast=True,
-                revision=self._revision,
-                token=self._token,
-                trust_remote_code=self._trust_remote_code,
-                local_files_only=True,
-            )
-            logger.debug("Tokenizer loaded from local cache: %s", self._model)
-            return
-        except (OSError, EnvironmentError) as e:
-            logger.debug("Tokenizer not found locally: %s", e)
-            # Fall through to network load.
+        # Temporary suppress internal transformers warnings (e.g., missing token).
+        with temporary_logger_level("transformers", logging.WARNING):
+            # Attempt 1: load from local cache only.
+            try:
+                self._tokenizer = AutoTokenizer.from_pretrained(
+                    self._model,
+                    use_fast=True,
+                    revision=self._revision,
+                    token=self._token,
+                    trust_remote_code=self._trust_remote_code,
+                    local_files_only=True,
+                )
+                logger.debug("Tokenizer loaded from local cache: %s", self._model)
+                return
+            except (OSError, EnvironmentError) as e:
+                logger.debug("Tokenizer not found locally: %s", e)
+                # Fall through to network load.
 
-        # Print a one‑time warning about missing token (only if we are about to hit the network).
-        global _WARNING_PRINTED
-        if self._token is None and not _WARNING_PRINTED:
-            logger.warning(
-                "No HF_TOKEN provided. Set HF_TOKEN environment variable or use --hf-token "
-                "to increase rate limits and speed up downloads."
-            )
-            _WARNING_PRINTED = True
+            # Print a one‑time warning about missing token (only if we are about to hit the network).
+            global _WARNING_PRINTED
+            if self._token is None and not _WARNING_PRINTED:
+                logger.warning(
+                    "No HF_TOKEN provided. Set HF_TOKEN environment variable or use --hf-token "
+                    "to increase rate limits and speed up downloads."
+                )
+                _WARNING_PRINTED = True
 
-        # Attempt 2: load from the network with optimised parameters.
-        try:
-            self._tokenizer = AutoTokenizer.from_pretrained(
-                self._model,
-                use_fast=True,
-                revision=self._revision,
-                token=self._token,
-                trust_remote_code=self._trust_remote_code,
-                force_download=False,
-                resume_download=False,
-            )
-            logger.info("Tokenizer downloaded and cached: %s", self._model)
-        except Exception as exc:
-            raise RuntimeError(f"Failed to load tokenizer '{self._model}': {exc}") from exc
+            # Attempt 2: load from the network with optimised parameters.
+            try:
+                self._tokenizer = AutoTokenizer.from_pretrained(
+                    self._model,
+                    use_fast=True,
+                    revision=self._revision,
+                    token=self._token,
+                    trust_remote_code=self._trust_remote_code,
+                    force_download=False,
+                    resume_download=False,
+                )
+                logger.info("Tokenizer downloaded and cached: %s", self._model)
+            except Exception as exc:
+                raise RuntimeError(f"Failed to load tokenizer '{self._model}': {exc}") from exc
 
     def count(self, text: str, ext: str = "") -> int:
         """Return the number of tokens in the text, updating internal stats."""
