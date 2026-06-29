@@ -1,4 +1,3 @@
-# tests/unit/application/test_factories.py
 """Unit tests for ExportComponentFactory with new pipeline architecture."""
 
 from pathlib import Path
@@ -201,9 +200,13 @@ class TestExportComponentFactory:
             config_path=config.redact.config_path,
         )
 
+        # Updated to include all parameters passed to create_token_counter
         mock_create_token.assert_called_once_with(
             "huggingface",
             model=config.token.model,
+            revision=config.token.revision,
+            token=config.token.token,
+            trust_remote_code=config.token.trust_remote_code,
         )
 
         mock_entry_processor.assert_called_once()
