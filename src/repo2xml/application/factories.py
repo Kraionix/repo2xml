@@ -102,6 +102,9 @@ class ExportComponentFactory:
             token_counter = create_token_counter(
                 "huggingface",
                 model=config.token.model,
+                revision=config.token.revision,
+                token=config.token.token,
+                trust_remote_code=config.token.trust_remote_code,
             )
 
         # --- Build the policy chain ---

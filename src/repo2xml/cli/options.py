@@ -97,6 +97,7 @@ class ExportOptions:
     # Token counting
     count_tokens: bool = False
     tokenizer_model: str = "deepseek-ai/DeepSeek-V4-Pro"
+    hf_token: Optional[str] = None          # Authentication token for Hugging Face
 
     def build_config(self, root: Path) -> ExportConfig:
         """Build and validate an ExportConfig from these options."""
@@ -181,6 +182,9 @@ class ExportOptions:
         token_cfg = TokenCountConfig(
             enabled=count_enabled,
             model=self.tokenizer_model,
+            token=self.hf_token,           # Pass token from CLI
+            revision="main",               # default, can be made configurable later
+            trust_remote_code=False,       # default
         )
 
         config = ExportConfig(

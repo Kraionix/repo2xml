@@ -68,6 +68,7 @@ def main(
     classify_config: Optional[Path] = typer.Option(None, "--classify-config", help="Path to YAML file with classification rules.", exists=True, file_okay=True, dir_okay=False, resolve_path=True),
     count_tokens: bool = typer.Option(False, "--count-tokens/--no-count-tokens", help="Count tokens in text files."),
     tokenizer_model: str = typer.Option("deepseek-ai/DeepSeek-V4-Pro", "--tokenizer-model", help="Hugging Face model for tokenization."),
+    hf_token: Optional[str] = typer.Option(None, "--hf-token", help="Hugging Face token for authenticated downloads (increases rate limits)."),
     verbose_errors: bool = typer.Option(False, "--verbose-errors", help="Show detailed error examples in reports."),
 ) -> None:
     """repo2xml: convert a repository into a single context document for LLM ingestion."""
@@ -121,6 +122,7 @@ def main(
         classify_config=classify_config,
         count_tokens=count_tokens,
         tokenizer_model=tokenizer_model,
+        hf_token=hf_token,
     )
 
     execute_export(console=console, options=options)

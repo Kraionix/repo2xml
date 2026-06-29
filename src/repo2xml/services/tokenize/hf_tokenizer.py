@@ -2,15 +2,19 @@
 """Hugging Face tokenizer implementation with lazy loading and chunking."""
 
 import logging
-from typing import Optional, Dict, Any
+import os
+from typing import Any, Dict, Optional
 
-from repo2xml.domain.model import TokenStats
 from repo2xml.contracts import TokenCounter
+from repo2xml.domain.model import TokenStats
 
 logger = logging.getLogger("repo2xml.tokenizer")
 
 # Chunk size in characters – large enough to be efficient, small enough to avoid OOM.
 TOKENIZE_CHUNK_SIZE = 200_000
+
+# Module‑level flag to print the missing‑token warning only once.
+_WARNING_PRINTED = False
 
 
 class HuggingFaceTokenCounter(TokenCounter):
@@ -19,11 +23,23 @@ class HuggingFaceTokenCounter(TokenCounter):
 
     Loads the tokenizer lazily on the first call to count().
     Uses chunking for texts longer than TOKENIZE_CHUNK_SIZE.
+    Supports two‑phase loading: local cache first, then network.
     """
 
-    def __init__(self, model: str, **kwargs: Any):
+    def __init__(
+        self,
+        model: str,
+        revision: str = "main",
+        token: Optional[str] = None,
+        trust_remote_code: bool = False,
+        **kwargs: Any,
+    ) -> None:
         self._model = model
-        self._kwargs = kwargs
+        self._revision = revision
+        self._trust_remote_code = trust_remote_code
+        self._token = token or os.getenv("HF_TOKEN")
+        self._kwargs = kwargs  # Kept for forward compatibility
+
         self._tokenizer = None  # Will be loaded lazily
 
         # Internal statistics
@@ -32,13 +48,23 @@ class HuggingFaceTokenCounter(TokenCounter):
         self._files_skipped = 0
         self._tokens_by_ext: Dict[str, int] = {}
         self._max_tokens = 0
-        self._min_tokens = None  # type: Optional[int]
+        self._min_tokens: Optional[int] = None
         self._errors = 0
 
+        # Suppress internal transformers warnings (e.g., missing token) after our own message.
+        logging.getLogger("transformers").setLevel(logging.WARNING)
+
     def _load_tokenizer(self) -> None:
-        """Import transformers and load the tokenizer (lazy)."""
+        """
+        Import transformers and load the tokenizer lazily.
+
+        Implements two‑phase loading:
+            1. Attempt local_files_only=True (cache‑only).
+            2. On failure, load from the network with explicit parameters.
+        """
         if self._tokenizer is not None:
             return
+
         try:
             from transformers import AutoTokenizer
         except ImportError as exc:
@@ -47,8 +73,43 @@ class HuggingFaceTokenCounter(TokenCounter):
                 "Install with: pip install repo2xml[tokens]"
             ) from exc
 
+        # Attempt 1: load from local cache only.
         try:
-            self._tokenizer = AutoTokenizer.from_pretrained(self._model, **self._kwargs)
+            self._tokenizer = AutoTokenizer.from_pretrained(
+                self._model,
+                use_fast=True,
+                revision=self._revision,
+                token=self._token,
+                trust_remote_code=self._trust_remote_code,
+                local_files_only=True,
+            )
+            logger.debug("Tokenizer loaded from local cache: %s", self._model)
+            return
+        except (OSError, EnvironmentError) as e:
+            logger.debug("Tokenizer not found locally: %s", e)
+            # Fall through to network load.
+
+        # Print a one‑time warning about missing token (only if we are about to hit the network).
+        global _WARNING_PRINTED
+        if self._token is None and not _WARNING_PRINTED:
+            logger.warning(
+                "No HF_TOKEN provided. Set HF_TOKEN environment variable or use --hf-token "
+                "to increase rate limits and speed up downloads."
+            )
+            _WARNING_PRINTED = True
+
+        # Attempt 2: load from the network with optimised parameters.
+        try:
+            self._tokenizer = AutoTokenizer.from_pretrained(
+                self._model,
+                use_fast=True,
+                revision=self._revision,
+                token=self._token,
+                trust_remote_code=self._trust_remote_code,
+                force_download=False,
+                resume_download=False,
+            )
+            logger.info("Tokenizer downloaded and cached: %s", self._model)
         except Exception as exc:
             raise RuntimeError(f"Failed to load tokenizer '{self._model}': {exc}") from exc
 

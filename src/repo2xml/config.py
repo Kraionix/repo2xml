@@ -168,6 +168,9 @@ class TokenCountConfig:
     """Token counting settings (Hugging Face)."""
     enabled: bool = False
     model: str = "deepseek-ai/DeepSeek-V4-Pro"
+    revision: str = "main"                 # Hugging Face revision (branch/tag/SHA)
+    trust_remote_code: bool = False        # Whether to trust remote code (for custom models)
+    token: Optional[str] = None            # Authentication token (takes precedence over env)
 
     def validate(self) -> None:
         if self.enabled:
