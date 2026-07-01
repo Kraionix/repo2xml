@@ -4,8 +4,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Any
 
 from repo2xml.contracts import StatsProvider
-from repo2xml.domain.model import ExportStats, TokenStats, SkipCode, ErrorCode
-from repo2xml.services.classify.models import ClassificationStats
+from repo2xml.domain.model import ExportStats, TokenStats, SkipCode, ErrorCode, ClassificationStats
 from repo2xml.services.ingest.redact.models import RedactionStats
 from repo2xml.services.scan.scanner import ScanStats
 

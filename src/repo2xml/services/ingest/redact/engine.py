@@ -54,10 +54,6 @@ class RedactionEngine(StatsProvider):
                 text = new_text
         return text
 
-    def get_stats(self) -> RedactionStats:
-        """Return redaction statistics as a RedactionStats object."""
-        return self._stats
-
     def apply_to(self, stats: ExportStats) -> None:
         """Apply redaction statistics to ExportStats."""
         stats.redaction_stats = self._stats

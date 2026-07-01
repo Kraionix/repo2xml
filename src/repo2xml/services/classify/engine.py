@@ -6,14 +6,13 @@ from pathlib import Path
 from typing import Optional
 
 from repo2xml.contracts import StatsProvider
-from repo2xml.domain.model import ExportStats, FileEntry
+from repo2xml.domain.model import ExportStats, FileEntry, ClassificationResult, ClassificationStats
 from repo2xml.services.classify.classifiers import (
     SNIFF_BYTES,
     ExtensionClassifier,
     detect_bom,
     looks_binary,
 )
-from repo2xml.services.classify.models import ClassificationResult, ClassificationStats
 from repo2xml.services.classify.rule_loader import load_config
 
 logger = logging.getLogger("repo2xml.classify")
@@ -65,10 +64,6 @@ class ClassificationEngine(StatsProvider):
         if looks_binary(sample, bom_enc, self._binary_threshold):
             return ClassificationResult(kind="binary", encoding=bom_enc, sample=sample)
         return ClassificationResult(kind="text", encoding=bom_enc or "utf-8", sample=sample)
-
-    def get_stats(self) -> ClassificationStats:
-        """Return classification statistics as a ClassificationStats object."""
-        return self._stats
 
     def apply_to(self, stats: ExportStats) -> None:
         """Apply classification statistics to ExportStats."""

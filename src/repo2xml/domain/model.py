@@ -98,7 +98,7 @@ class ExportStats:
     errors_by_code: dict[str, int] = field(default_factory=dict)
     scan_warning_summary: Optional[str] = None
     redaction_stats: Optional[Any] = None
-    classification_stats: Optional[Any] = None
+    classification_stats: Optional["ClassificationStats"] = None
     token_stats: Optional[TokenStats] = None
     scan_stats: Optional["ScanStats"] = None   # Detailed scan error statistics
 
@@ -121,6 +121,15 @@ class ClassificationResult:
     encoding: Optional[str] = None
     sample: Optional[bytes] = None
     error: Optional[str] = None
+
+
+@dataclass(slots=True)
+class ClassificationStats:
+    """Aggregated statistics about classification operations."""
+    total_files: int = 0
+    by_extension: int = 0
+    by_content: int = 0
+    errors: int = 0
 
 
 @dataclass(slots=True)

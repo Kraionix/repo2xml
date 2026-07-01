@@ -9,14 +9,6 @@ from repo2xml.domain.model import ExportStats
 class StatsProvider(Protocol):
     """Protocol for components that provide statistics."""
 
-    def get_stats(self) -> dict[str, object]:
-        """Return a dictionary of statistics for this component.
-
-        The returned dictionary may contain any keys; it is up to the
-        StatisticsCollector to interpret and merge them into ExportStats.
-        """
-        ...
-
     def apply_to(self, stats: ExportStats) -> None:
         """Apply this provider's statistics to the given ExportStats object.
 

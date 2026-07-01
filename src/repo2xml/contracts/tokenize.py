@@ -1,10 +1,9 @@
 # src/repo2xml/contracts/tokenize.py
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from typing import Protocol
 
-from repo2xml.domain.model import TokenStats
+from repo2xml.domain.model import TokenStats, ExportStats
 
 
 class TokenCounter(Protocol):
@@ -14,15 +13,14 @@ class TokenCounter(Protocol):
         """Count tokens in text, updating internal stats. Return token count."""
         ...
 
-    def get_stats(self) -> TokenStats:
-        """Return accumulated token statistics."""
+    def apply_to(self, stats: ExportStats) -> None:
+        """Apply accumulated token statistics to ExportStats."""
         ...
 
 
-class TokenCounterFactory(ABC):
+class TokenCounterFactory(Protocol):
     """Abstract factory for token counters."""
 
-    @abstractmethod
     def create(self, model: str, **kwargs) -> TokenCounter:
         """Create a TokenCounter instance for the given model."""
         ...

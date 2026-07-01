@@ -6,7 +6,7 @@ import os
 from typing import Any, Dict, Optional
 
 from repo2xml.contracts import TokenCounter
-from repo2xml.domain.model import TokenStats
+from repo2xml.domain.model import TokenStats, ExportStats
 from repo2xml.utils.logging_utils import temporary_logger_level
 
 logger = logging.getLogger("repo2xml.tokenizer")
@@ -146,9 +146,9 @@ class HuggingFaceTokenCounter(TokenCounter):
             self._files_skipped += 1
             return 0
 
-    def get_stats(self) -> TokenStats:
-        """Return the accumulated TokenStats."""
-        return TokenStats(
+    def apply_to(self, stats: ExportStats) -> None:
+        """Apply accumulated token statistics to ExportStats."""
+        stats.token_stats = TokenStats(
             total_tokens=self._total_tokens,
             files_processed=self._files_processed,
             files_skipped=self._files_skipped,

@@ -9,6 +9,7 @@ from repo2xml.domain.model import ExportMeta, FileEntry, FilePayload, TokenStats
 WriteFn = Callable[[str], None]
 
 
+# ABC is used here because this interface has many methods and serves as a base for format-specific writers.
 class DocumentWriter(ABC):
     """
     Abstract interface for writing a complete output document.
