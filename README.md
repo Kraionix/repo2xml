@@ -89,6 +89,12 @@ repo2xml --redact-secrets --redact-config .repo2xml-redact.yml -o context.xml
 
 # Export with token counting (requires 'tokens' extra)
 repo2xml --count-tokens -o context.xml
+
+# Validate the generated XML after export
+repo2xml --validate-xml -o context.xml
+
+# Show detailed error examples in reports
+repo2xml --verbose-errors --report -o context.xml
 ```
 
 ### Export with splitting into parts
@@ -149,9 +155,27 @@ repo2xml restore [RESTORE OPTIONS] XML_FILE
 | `--redact-secrets` | Enable secret redaction |
 | `--redact-config` | Path to YAML file overriding redaction rules |
 | `--compress {none,gzip,zstd}` | Output stream compression |
-| `--stdout` / `--clipboard` | Alternative output targets |
+| `--stdout` / `--clipboard` / `--stats-only` | Alternative output targets; `--stats-only` discards output |
 | `--count-tokens` / `--no-count-tokens` | Count tokens in text files using Hugging Face tokenizers |
 | `--tokenizer-model TEXT` | Hugging Face model for tokenization (default: `deepseek-ai/DeepSeek-V4-Pro`) |
+| `--hf-token TEXT` | Hugging Face token for authenticated downloads (increases rate limits) |
+| `--verbose-errors` | Show detailed error examples in reports |
+| `--validate-xml` | Validate the generated XML after writing (file output only) |
+| `--quiet` / `-q` | Suppress non‑error output |
+| `--no-color` | Disable coloured output |
+| `--log-level {info,warning,error}` | Logging verbosity |
+| `--size-min INT` / `--size-max INT` | Filter files by size (bytes) |
+| `--newer-than DATE` / `--older-than DATE` | Filter files by modification time (ISO‑8601) |
+| `--gitignore` / `--no-gitignore` | Respect `.gitignore` files (default: on) |
+| `--ignore PATTERN`, `-i` | Additional ignore patterns (can repeat) |
+| `--include PATTERN` | Additional include patterns (can repeat) |
+| `--hard-exclude DIR` | Directory names to always exclude (default: `.git`) |
+| `--follow-symlinks-dirs` / `--no-follow-symlinks-dirs` | Follow symlinks for directories |
+| `--symlinks-files {follow,skip,as-link}` | How to handle symlink files |
+| `--max-size INT` | Max size in bytes for embedding text/base64 content (default: 100000) |
+| `--newline {preserve,lf}` | Newline normalisation |
+| `--decode-errors {replace,strict}` | Text decoding errors policy |
+| `--progress` / `--no-progress` | Show progress bars (default: on) |
 | **New in 0.6.0** | |
 | `--split` | Enable splitting output into multiple parts (first part contains only structure) |
 | `--max-tokens INT` | Maximum tokens per part (default: 32000) |
@@ -171,6 +195,8 @@ repo2xml restore [RESTORE OPTIONS] XML_FILE
 | `--quiet` | Suppress non‑error output |
 | `--no-strict-validation` | Disable strict XML validation (useful for recovery) |
 | `--allow-absolute-symlinks` | Allow symlinks with absolute targets (security risk; disabled by default) |
+| `--verbose-errors` | Show detailed error examples in reports |
+| `--no-color` | Disable coloured output |
 
 ---
 
@@ -293,7 +319,7 @@ When splitting is enabled, the output consists of multiple files:
   - `PipelineOrchestrator` – coordinates the full export flow (scan, filter, process, write).
   - `EntryProcessor` – a thin wrapper that delegates file processing to a `Pipeline`.
   - `Pipeline` – executes a sequence of `Step` objects in order, with early termination support.
-  - `ProcessingContext` – shared state container passed through all steps (holds the current `FileEntry`, `ClassificationResult`, `FilePayload`, token count, and control flags).
+  - `ProcessingResult` – shared state container passed through all steps (holds the current `FileEntry`, `ClassificationResult`, `FilePayload`, token count, and control flags).
   - `Step` – a protocol that defines a single processing stage (e.g., classification, payload building, redaction, token counting).
   - Concrete step implementations:
     - `ClassifyStep` – runs the classification engine.
