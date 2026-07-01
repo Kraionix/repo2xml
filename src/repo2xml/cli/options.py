@@ -23,6 +23,7 @@ from repo2xml.config import (
     SymlinkFilesMode,
     TextHandlingConfig,
     TokenCountConfig,
+    PartitionConfig,
 )
 from repo2xml.domain.exceptions import ConfigurationError
 from repo2xml.services.output.targets import CompressMode
@@ -33,11 +34,7 @@ logger = logging.getLogger("repo2xml.cli.options")
 
 @dataclass(slots=True)
 class ExportOptions:
-    """Container for all CLI export options.
-
-    This class replaces the long parameter list in execute_export and
-    centralises validation and ExportConfig construction.
-    """
+    """Container for all CLI export options."""
 
     # Paths and output
     path: Path
@@ -62,7 +59,7 @@ class ExportOptions:
     progress: bool = True
     report: bool = False
     redact: bool = False
-    log_level: str = "info"          # will be mapped to LogLevel
+    log_level: str = "info"
     validate_xml: bool = False
     quiet: bool = False
     no_color: bool = False
@@ -97,7 +94,14 @@ class ExportOptions:
     # Token counting
     count_tokens: bool = False
     tokenizer_model: str = "deepseek-ai/DeepSeek-V4-Pro"
-    hf_token: Optional[str] = None          # Authentication token for Hugging Face
+    hf_token: Optional[str] = None
+
+    # --- NEW: Partition options ---
+    split: bool = False
+    max_tokens_per_part: int = 32000
+    part_pattern: str = "context_part_{n:03d}.xml"
+    clipboard_parts: bool = False
+    no_part_stats: bool = False
 
     def build_config(self, root: Path) -> ExportConfig:
         """Build and validate an ExportConfig from these options."""
@@ -182,9 +186,18 @@ class ExportOptions:
         token_cfg = TokenCountConfig(
             enabled=count_enabled,
             model=self.tokenizer_model,
-            token=self.hf_token,           # Pass token from CLI
-            revision="main",               # default, can be made configurable later
-            trust_remote_code=False,       # default
+            token=self.hf_token,
+            revision="main",
+            trust_remote_code=False,
+        )
+
+        # Partition config
+        partition_cfg = PartitionConfig(
+            enabled=self.split,
+            max_tokens_per_part=self.max_tokens_per_part,
+            output_pattern=self.part_pattern if not self.clipboard_parts else None,
+            clipboard_mode=self.clipboard_parts,
+            include_part_stats=not self.no_part_stats,
         )
 
         config = ExportConfig(
@@ -198,6 +211,7 @@ class ExportOptions:
             redact=redact_cfg,
             classify=classify_cfg,
             token=token_cfg,
+            partition=partition_cfg,
         )
         config.normalize()
         config.validate()
@@ -216,3 +230,8 @@ class ExportOptions:
                     "Skipping XML validation."
                 )
                 self.validate_xml = False
+        # Additional validation for partition
+        if self.split and self.clipboard_parts:
+            # Both split and clipboard_parts can be used together; clipboard_parts implies split?
+            # Actually clipboard_parts only makes sense with split, but we'll allow if split is also set.
+            pass

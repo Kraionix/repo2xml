@@ -37,11 +37,14 @@ class XMLDocumentWriter(DocumentWriter):
 
     Produces the repo2xml XML format (schema version 1.2).
     Supports compact, pretty, and minified output.
+    Now parameterized with root tag and optional structure inclusion.
     """
 
     def __init__(
         self,
         *,
+        root_tag: str = XmlFormatSpec.TAG_ROOT,
+        include_structure: bool = True,
         formatting: str = "compact",
         include_mtime: bool = True,
         include_size: bool = True,
@@ -50,6 +53,8 @@ class XMLDocumentWriter(DocumentWriter):
     ):
         if formatting not in {"compact", "pretty", "minify"}:
             raise ValueError(f"Unknown formatting: {formatting}")
+        self.root_tag = root_tag
+        self.include_structure = include_structure
         self.formatting = formatting
         self.include_mtime = include_mtime
         self.include_size = include_size
@@ -102,7 +107,7 @@ class XMLDocumentWriter(DocumentWriter):
         i2 = self.indent(2)
         self._write(f'{i0}<?xml version="1.0" encoding="utf-8"?>{nl}')
         self._write(
-            f'{i0}<{XmlFormatSpec.TAG_ROOT} {XmlFormatSpec.ATTR_VERSION}="{SCHEMA_VERSION}" '
+            f'{i0}<{self.root_tag} {XmlFormatSpec.ATTR_VERSION}="{SCHEMA_VERSION}" '
             f'{XmlFormatSpec.ATTR_TOOL_VERSION}="{esc_attr(meta.tool_version)}">{nl}'
         )
         self._write(f"{i1}<{XmlFormatSpec.TAG_META}>{nl}")
@@ -116,6 +121,8 @@ class XMLDocumentWriter(DocumentWriter):
         self._write(f"{i1}</{XmlFormatSpec.TAG_META}>{nl}")
 
     def write_structure(self, entries: List[FileEntry]) -> None:
+        if not self.include_structure:
+            return
         nl = self.nl
         self._write(f"{self.indent(1)}<{XmlFormatSpec.TAG_PROJECT_STRUCTURE}>{nl}")
         entries_view = sorted(entries, key=lambda e: e.rel_path)
@@ -186,10 +193,10 @@ class XMLDocumentWriter(DocumentWriter):
         self._write(f'{self.indent(1)}<{XmlFormatSpec.TAG_STATISTICS} {XmlFormatSpec.ATTR_TOTAL_TOKENS}="{stats.total_tokens}" />{self.nl}')
 
     def end_document(self) -> None:
-        self._write(f"{self.indent(0)}</{XmlFormatSpec.TAG_ROOT}>{self.nl}")
+        self._write(f"{self.indent(0)}</{self.root_tag}>{self.nl}")
 
     # ------------------------------------------------------------------
-    # Private payload writers (copied from old XMLSerializer)
+    # Private payload writers
     # ------------------------------------------------------------------
 
     def _write_metadata(self, entry: FileEntry, payload: MetadataPayload, token_count: Optional[int] = None) -> None:

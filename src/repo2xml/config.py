@@ -168,9 +168,9 @@ class TokenCountConfig:
     """Token counting settings (Hugging Face)."""
     enabled: bool = False
     model: str = "deepseek-ai/DeepSeek-V4-Pro"
-    revision: str = "main"                 # Hugging Face revision (branch/tag/SHA)
-    trust_remote_code: bool = False        # Whether to trust remote code (for custom models)
-    token: Optional[str] = None            # Authentication token (takes precedence over env)
+    revision: str = "main"
+    trust_remote_code: bool = False
+    token: Optional[str] = None
 
     def validate(self) -> None:
         if self.enabled:
@@ -181,6 +181,29 @@ class TokenCountConfig:
                     "Token counting requires the 'transformers' library. "
                     "Install with: pip install repo2xml[tokens]"
                 )
+
+
+# ----------------------------------------------------------------------
+# Partition configuration (new)
+# ----------------------------------------------------------------------
+
+@dataclass(slots=True)
+class PartitionConfig:
+    """
+    Configuration for splitting the export output into multiple parts.
+    """
+    enabled: bool = False
+    max_tokens_per_part: int = 32000
+    output_pattern: Optional[str] = "context_part_{n:03d}.xml"
+    clipboard_mode: bool = False
+    include_part_stats: bool = True
+
+    def validate(self) -> None:
+        if self.enabled:
+            if self.max_tokens_per_part <= 0:
+                raise ConfigurationError("max_tokens_per_part must be > 0")
+            if not self.clipboard_mode and not self.output_pattern:
+                raise ConfigurationError("output_pattern must be provided when clipboard_mode is False")
 
 
 # ----------------------------------------------------------------------
@@ -200,6 +223,7 @@ class ExportConfig:
     redact: RedactConfig = field(default_factory=RedactConfig)
     classify: ClassifyConfig = field(default_factory=ClassifyConfig)
     token: TokenCountConfig = field(default_factory=TokenCountConfig)
+    partition: PartitionConfig = field(default_factory=PartitionConfig)
 
     def normalize(self) -> None:
         self.format = (self.format or "xml").strip().lower()
@@ -216,6 +240,7 @@ class ExportConfig:
         self.redact.validate()
         self.classify.validate()
         self.token.validate()
+        self.partition.validate()
 
 
 # ----------------------------------------------------------------------
@@ -229,7 +254,7 @@ class RestoreConfig:
     restore_mtime: bool = True
     create_empty_for_missing: bool = False
     strict_validation: bool = True
-    allow_absolute_symlinks: bool = False   # Security: if False, absolute symlinks are rejected
+    allow_absolute_symlinks: bool = False
 
     def normalize(self) -> None:
         self.format = (self.format or "xml").strip().lower()

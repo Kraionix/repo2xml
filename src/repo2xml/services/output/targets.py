@@ -60,7 +60,6 @@ def open_output_stream(
         if compress == CompressMode.gzip:
             try:
                 gz = gzip.GzipFile(fileobj=base, mode="wb")
-                # Register the gzip wrapper for cleanup
                 stack.enter_context(gz)
                 yield gz
             except Exception as e:
@@ -76,8 +75,6 @@ def open_output_stream(
             try:
                 cctx = zstd.ZstdCompressor(level=3)
                 zw = cctx.stream_writer(base)
-                # zstandard stream writer doesn't support context manager directly,
-                # so we register a callback to close it.
                 stack.callback(zw.close)
                 yield zw
             except Exception as e:
@@ -168,6 +165,46 @@ class ClipboardTarget(OutputTarget):
         return "clipboard"
 
 
+class ClipboardWithPauseTarget(OutputTarget):
+    """
+    Clipboard target that copies each part to the clipboard and pauses
+    for user confirmation before proceeding.
+
+    Used in interactive clipboard mode for multi-part exports.
+    """
+
+    @contextmanager
+    def open(self) -> Generator[BinaryIO, None, None]:
+        buf = io.BytesIO()
+        try:
+            yield buf
+            buf.seek(0)
+            try:
+                import pyperclip
+            except ImportError as e:
+                raise OutputError("Clipboard support requires: pip install pyperclip") from e
+
+            content = buf.read().decode("utf-8")
+            try:
+                pyperclip.copy(content)
+            except pyperclip.PyperclipException as e:
+                raise OutputError(f"Clipboard error: {e}") from e
+
+            # Pause and wait for user confirmation
+            print("\n" + "=" * 60)
+            print(f"Part copied to clipboard ({len(content)} chars, ~{len(content)//4} tokens)")
+            print("=" * 60)
+            input("Press Enter to continue to the next part...")
+        finally:
+            try:
+                buf.close()
+            except Exception:
+                pass
+
+    def describe(self) -> str:
+        return "clipboard-with-pause"
+
+
 class DevNullTarget(OutputTarget):
     """Discard all output bytes (useful for --stats-only)."""
 
@@ -197,6 +234,7 @@ __all__ = [
     "FileTarget",
     "StdoutTarget",
     "ClipboardTarget",
+    "ClipboardWithPauseTarget",
     "DevNullTarget",
     "try_relpath_posix",
 ]

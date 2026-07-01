@@ -3,7 +3,7 @@
 Convert a source code repository into a single, structured context document for LLM ingestion.
 Supports the reverse operation: restore a full repository from an XML export.
 
-**Version 0.5.0**
+**Version 0.6.0**
 
 ---
 
@@ -17,6 +17,13 @@ Supports the reverse operation: restore a full repository from an XML export.
   - Fault‑tolerant scanning and reading
   - Configurable output (compact/pretty/minified), compression (gzip/zstd)
   - Deterministic output options (omit timestamps, redact paths, etc.)
+- **Split export into multiple parts** (new in 0.6.0):
+  - Automatically split the XML output into parts that fit within token limits (default 32k tokens per part)
+  - First part contains only the project structure (meta + directory tree)
+  - Subsequent parts contain file entries, grouped to respect the limit
+  - Files are never truncated; a file that would exceed the limit starts a new part
+  - Configurable via CLI and API
+  - Optional interactive clipboard mode: copies each part to the clipboard with a pause for user confirmation
 - **Token counting** (optional):
   - Count tokens in text files using Hugging Face tokenizers (lazy‑loaded)
   - Per‑file token counts stored in XML (attribute `tokens`)
@@ -71,7 +78,7 @@ Python 3.10+ is required.
 
 ## Quick Start
 
-### Export a repository
+### Export a repository (single file)
 
 ```bash
 # Full XML export
@@ -82,9 +89,22 @@ repo2xml --redact-secrets --redact-config .repo2xml-redact.yml -o context.xml
 
 # Export with token counting (requires 'tokens' extra)
 repo2xml --count-tokens -o context.xml
+```
 
-# See all options
-repo2xml --help
+### Export with splitting into parts
+
+```bash
+# Split output into parts of at most 32k tokens each
+repo2xml --split -o context.xml
+
+# Custom token limit (e.g. 16k tokens per part)
+repo2xml --split --max-tokens 16000 -o context.xml
+
+# Custom part filename pattern
+repo2xml --split --part-pattern "part_{n:03d}.xml"
+
+# Interactive clipboard mode: copy each part to clipboard with pause
+repo2xml --split --clipboard-parts
 ```
 
 ### Restore a repository from XML
@@ -132,6 +152,12 @@ repo2xml restore [RESTORE OPTIONS] XML_FILE
 | `--stdout` / `--clipboard` | Alternative output targets |
 | `--count-tokens` / `--no-count-tokens` | Count tokens in text files using Hugging Face tokenizers |
 | `--tokenizer-model TEXT` | Hugging Face model for tokenization (default: `deepseek-ai/DeepSeek-V4-Pro`) |
+| **New in 0.6.0** | |
+| `--split` | Enable splitting output into multiple parts (first part contains only structure) |
+| `--max-tokens INT` | Maximum tokens per part (default: 32000) |
+| `--part-pattern STR` | Filename pattern for parts, e.g. `part_{n:03d}.xml` (default: `context_part_{n:03d}.xml`) |
+| `--clipboard-parts` | Copy each part to clipboard with a pause between them (interactive) |
+| `--no-part-stats` | Do not include per‑part statistics in the parts |
 
 ### Restore options
 
@@ -154,8 +180,17 @@ repo2xml restore [RESTORE OPTIONS] XML_FILE
 from pathlib import Path
 from repo2xml import RepoXML, ExportConfig, RestoreConfig
 
-# Export
+# Export (single file)
 config = ExportConfig()
+engine = RepoXML(config)
+with open("context.xml", "wb") as f:
+    stats = engine.export(Path("."), f)
+print(stats)
+
+# Export with splitting
+from repo2xml.config import PartitionConfig
+config = ExportConfig()
+config.partition = PartitionConfig(enabled=True, max_tokens_per_part=32000)
 engine = RepoXML(config)
 with open("context.xml", "wb") as f:
     stats = engine.export(Path("."), f)
@@ -235,6 +270,10 @@ Notable additions in schema 1.2:
 - Each `<file>` element (for text files) may contain a `tokens` attribute with the number of tokens counted for that file (if `--count-tokens` is used).
 - An optional `<statistics total_tokens="..."/>` element at the end of the document provides the total token count across all processed text files.
 
+When splitting is enabled, the output consists of multiple files:
+- **Part 0** (`context_part_000.xml`): Contains `<repository_context>` with meta and `<project_structure>` only (no `<files>`).
+- **Part 1, 2, …** (`context_part_001.xml`, etc.): Each contains `<repository_part>` with meta (no structure) and a `<files>` section containing a subset of file entries. Each part respects the token limit.
+
 ---
 
 ## Architecture
@@ -264,6 +303,7 @@ Notable additions in schema 1.2:
   - `StepFactory` – creates the ordered step list based on the current configuration (enables optional steps like redaction and token counting only when enabled).
   - `ProcessingServices` – a dependency container holding the services needed by steps.
   - `WriterCoordinator` – manages buffered writing and delegates to the serializer.
+  - `MultiStreamManager` – new in 0.6.0: coordinates splitting into multiple parts, manages buffering and token limits, and switches output streams automatically.
   - `StatisticsCollector` – aggregates counters, errors, and token statistics.
 - **Facade** – `RepoXML` exposes a clean public API, wiring all components together.
 - **CLI** – Typer‑based command line interface with Rich progress reporting.

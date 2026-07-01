@@ -13,6 +13,7 @@ from repo2xml.application.services import ProcessingServices
 from repo2xml.application.statistics_collector import StatisticsCollector
 from repo2xml.application.step_factory import StepFactory
 from repo2xml.application.writer_coordinator import WriterCoordinator
+from repo2xml.application.partition import MultiStreamManager
 from repo2xml.config import ExportConfig, Mode, SymlinkFilesMode
 from repo2xml.services.classify import ClassificationEngine
 from repo2xml.services.ingest.ingestor import StandardIngestor
@@ -22,8 +23,6 @@ from repo2xml.services.scan.gitignore import GitignoreEngine
 from repo2xml.services.scan.registry import create_scanner
 from repo2xml.services.serialize.factory import get_format_factory
 from repo2xml.services.tokenize import create_token_counter
-
-# Import the policy implementations
 from repo2xml.services.policies import (
     SymlinkPolicy,
     ModePolicy,
@@ -124,23 +123,47 @@ class ExportComponentFactory:
         pipeline = Pipeline(steps)
         entry_processor = EntryProcessor(pipeline)
 
-        # --- Document writer ---
-        factory = get_format_factory(config.format)
-        # We'll create the writer with a dummy write_fn and set it later in WriterCoordinator.
-        document_writer = factory.create_document_writer(
-            formatting=config.output.formatting.value,
-            include_mtime=config.output.include_mtime,
-            include_size=config.output.include_size,
-            text_decode_errors=config.text.decode_errors.value,
-            write_fn=lambda s: None,  # dummy, will be replaced
-        )
+        # --- Document writer factory for partitioning ---
+        format_factory = get_format_factory(config.format)
 
-        # --- Writer coordinator ---
-        writer_coordinator = WriterCoordinator(
-            document_writer=document_writer,
-            output_target=self.output_target,
-            buffer_chars=config.output.write_buffer_chars,
-        )
+        def document_writer_factory(**kwargs):
+            return format_factory.create_document_writer(**kwargs)
+
+        # --- WriterCoordinator or MultiStreamManager ---
+        if config.partition.enabled:
+            # Ensure we have a token counter for partition decisions
+            if token_counter is None:
+                # Create a default token counter for partitioning
+                token_counter = create_token_counter(
+                    "huggingface",
+                    model=config.token.model or "deepseek-ai/DeepSeek-V4-Pro",
+                    revision=config.token.revision or "main",
+                    token=config.token.token,
+                    trust_remote_code=config.token.trust_remote_code or False,
+                )
+
+            writer_coordinator = MultiStreamManager(
+                config=config.partition,
+                mode=config.mode,
+                token_counter=token_counter,
+                document_writer_factory=document_writer_factory,
+                progress_reporter=reporter,
+                buffer_chars=config.output.write_buffer_chars,
+            )
+        else:
+            # --- Document writer (normal) ---
+            document_writer = format_factory.create_document_writer(
+                formatting=config.output.formatting.value,
+                include_mtime=config.output.include_mtime,
+                include_size=config.output.include_size,
+                text_decode_errors=config.text.decode_errors.value,
+                write_fn=lambda s: None,  # dummy, will be replaced
+            )
+            writer_coordinator = WriterCoordinator(
+                document_writer=document_writer,
+                output_target=self.output_target,
+                buffer_chars=config.output.write_buffer_chars,
+            )
 
         # --- Statistics collector ---
         providers: List[StatsProvider] = []
@@ -169,14 +192,6 @@ class ExportComponentFactory:
     def _build_policies(self, config: ExportConfig, ingestor: StandardIngestor) -> List[FilePolicy]:
         """
         Build the ordered list of file policies based on the current configuration.
-
-        The order is critical and determines which policy gets first chance to
-        handle a file. The current order is:
-        1. SymlinkPolicy (if not following symlinks)
-        2. ModePolicy (only for metadata mode, which short-circuits)
-        3. ErrorPolicy (handles classification errors)
-        4. BinaryPolicy (for binary files)
-        5. TextPolicy (for text files)
         """
         policies: List[FilePolicy] = []
 

@@ -6,6 +6,8 @@ from repo2xml.application.services import ProcessingServices
 from repo2xml.application.statistics_collector import StatisticsCollector
 from repo2xml.application.step import Step
 from repo2xml.application.step_factory import StepFactory
+# Optional: export partition-related classes if needed
+from repo2xml.application.partition import MultiStreamManager, BufferManager, TokenBasedStrategy
 
 __all__ = [
     "ExportComponentFactory",
@@ -15,4 +17,7 @@ __all__ = [
     "StatisticsCollector",
     "Step",
     "StepFactory",
+    "MultiStreamManager",
+    "BufferManager",
+    "TokenBasedStrategy",
 ]

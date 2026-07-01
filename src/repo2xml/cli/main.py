@@ -70,10 +70,16 @@ def main(
     tokenizer_model: str = typer.Option("deepseek-ai/DeepSeek-V4-Pro", "--tokenizer-model", help="Hugging Face model for tokenization."),
     hf_token: Optional[str] = typer.Option(None, "--hf-token", help="Hugging Face token for authenticated downloads (increases rate limits)."),
     verbose_errors: bool = typer.Option(False, "--verbose-errors", help="Show detailed error examples in reports."),
+    # NEW: Partition options
+    split: bool = typer.Option(False, "--split", help="Split output into multiple parts (first part contains only structure)."),
+    max_tokens_per_part: int = typer.Option(32000, "--max-tokens", help="Maximum tokens per part (only when --split is used)."),
+    part_pattern: str = typer.Option("context_part_{n:03d}.xml", "--part-pattern", help="Pattern for part filenames (e.g., 'part_{n:03d}.xml')."),
+    clipboard_parts: bool = typer.Option(False, "--clipboard-parts", help="Output parts to clipboard with pause between each."),
+    no_part_stats: bool = typer.Option(False, "--no-part-stats", help="Do not include per-part statistics in parts."),
 ) -> None:
     """repo2xml: convert a repository into a single context document for LLM ingestion."""
     console = Console(no_color=no_color)
-    logger = setup_logging(log_level, no_color=no_color)
+    setup_logging(log_level, no_color=no_color)
 
     if version:
         typer.echo(f"repo2xml {tool_version('repo2xml')}")
@@ -123,6 +129,11 @@ def main(
         count_tokens=count_tokens,
         tokenizer_model=tokenizer_model,
         hf_token=hf_token,
+        split=split,
+        max_tokens_per_part=max_tokens_per_part,
+        part_pattern=part_pattern,
+        clipboard_parts=clipboard_parts,
+        no_part_stats=no_part_stats,
     )
 
     execute_export(console=console, options=options)
@@ -144,7 +155,7 @@ def restore(
 ) -> None:
     """Restore a repository from a repo2xml XML export."""
     console = Console(no_color=no_color)
-    logger = setup_logging(LogLevel.info if not quiet else LogLevel.error, no_color=no_color)
+    setup_logging(LogLevel.info if not quiet else LogLevel.error, no_color=no_color)
     execute_restore(
         console=console,
         xml_file=xml_file,
