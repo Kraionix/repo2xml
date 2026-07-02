@@ -15,6 +15,7 @@ from .ingest import IngestorLike
 from .policies import FilePolicy
 from .progress import ProgressReporter
 from .scan import IgnoreProvider, ScannerLike, ScanStatsLike
+from .scan_usecase import ScanUseCase
 from .serialize import Deserializer, FormatFactory
 from .stats import StatsProvider
 from .tokenize import TokenCounter, TokenCounterFactory
@@ -27,6 +28,7 @@ __all__ = [
     "IgnoreProvider",
     "ScannerLike",
     "ScanStatsLike",
+    "ScanUseCase",
     "Deserializer",
     "FormatFactory",
     "StatsProvider",

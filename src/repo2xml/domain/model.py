@@ -247,3 +247,10 @@ class ProcessingResult:
 
     # Arbitrary metadata for extensions
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+@dataclass(slots=True)
+class ScanResult:
+    """Result of a scan operation."""
+    entries: List[FileEntry]
+    stats: "ScanStats"
+    warnings: Optional[str] = None

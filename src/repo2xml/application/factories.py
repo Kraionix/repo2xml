@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
-from repo2xml.contracts import FilePolicy, ProgressReporter, StatsProvider
+from repo2xml.contracts import FilePolicy, ProgressReporter, StatsProvider, ScanUseCase
 from repo2xml.application.entry_processor import EntryProcessor
 from repo2xml.application.pipeline import Pipeline
 from repo2xml.application.pipeline_orchestrator import PipelineOrchestrator
@@ -19,8 +19,6 @@ from repo2xml.services.classify import ClassificationEngine
 from repo2xml.services.ingest.ingestor import StandardIngestor
 from repo2xml.services.ingest.redact import RedactionEngine
 from repo2xml.services.output.targets import OutputTarget
-from repo2xml.services.scan.gitignore import GitignoreEngine
-from repo2xml.services.scan.registry import create_scanner
 from repo2xml.services.serialize.factory import get_format_factory
 from repo2xml.services.tokenize import create_token_counter
 from repo2xml.services.policies import (
@@ -42,38 +40,16 @@ class ExportComponentFactory:
     def __init__(
         self,
         config: ExportConfig,
-        root_path: Path,
         output_target: OutputTarget,
         progress: Optional[ProgressReporter] = None,
     ):
         self.config = config
-        self.root_path = root_path.resolve()
         self.output_target = output_target
         self.progress = progress or self._null_reporter()
 
-    def build(self) -> tuple[PipelineOrchestrator, StatisticsCollector]:
+    def build(self, scan_use_case: ScanUseCase) -> tuple[PipelineOrchestrator, StatisticsCollector]:
         config = self.config
-        root = self.root_path
         reporter = self.progress
-
-        # --- Gitignore provider ---
-        gitignore_engine = GitignoreEngine(
-            root_path=root,
-            user_ignore=config.scan.ignore_patterns,
-            user_include=config.scan.include_patterns,
-        )
-
-        # --- Scanner ---
-        scanner = create_scanner(
-            config.scan.source,
-            root_path=root,
-            ignore_provider=gitignore_engine,
-            use_gitignore=config.scan.use_gitignore,
-            follow_symlinks_dirs=config.scan.follow_symlinks_dirs,
-            symlinks_files=config.scan.symlinks_files.value,
-            hard_exclude_dirs=set(config.scan.hard_exclude_dirs),
-            **config.scan.source_options,
-        )
 
         # --- Ingestor ---
         ingestor = StandardIngestor(
@@ -83,7 +59,7 @@ class ExportComponentFactory:
 
         # --- Classification engine ---
         classification_engine = ClassificationEngine(
-            root,
+            Path.cwd(),  # root_path is not used by ClassificationEngine except for config discovery
             config_path=config.classify.config_path,
         )
 
@@ -91,7 +67,7 @@ class ExportComponentFactory:
         redaction_engine = None
         if config.redact.enabled:
             redaction_engine = RedactionEngine(
-                root_path=root,
+                root_path=Path.cwd(),  # root_path only used for default config discovery
                 config_path=config.redact.config_path,
             )
 
@@ -179,12 +155,11 @@ class ExportComponentFactory:
         # --- Pipeline orchestrator ---
         orchestrator = PipelineOrchestrator(
             config=config,
-            scanner=scanner,
+            scan_use_case=scan_use_case,
             entry_processor=entry_processor,
             writer_coordinator=writer_coordinator,
             statistics_collector=collector,
             progress_reporter=reporter,
-            root_path=root,
         )
 
         return orchestrator, collector

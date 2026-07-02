@@ -55,26 +55,13 @@ class RootPathMode(str, Enum):
 
 @dataclass(slots=True)
 class ScanConfig:
-    """Configuration for filesystem scanning and .gitignore handling."""
-    use_gitignore: bool = True
+    """Base configuration for scanning – common parameters for all sources."""
+    source: str = "filesystem"
     ignore_patterns: List[str] = field(default_factory=list)
     include_patterns: List[str] = field(default_factory=list)
-    hard_exclude_dirs: List[str] = field(default_factory=lambda: [".git"])
-    follow_symlinks_dirs: bool = False
-    symlinks_files: SymlinkFilesMode = SymlinkFilesMode.follow
-    source: str = "filesystem"
-    source_options: Dict[str, Any] = field(default_factory=dict)
 
     def normalize(self) -> None:
         self.source = self.source.strip().lower()
-        # Deduplicate hard_exclude_dirs
-        seen: set[str] = set()
-        deduped: list[str] = []
-        for d in self.hard_exclude_dirs:
-            if d not in seen:
-                seen.add(d)
-                deduped.append(d)
-        self.hard_exclude_dirs = deduped
 
     def validate(self) -> None:
         if not self.source:
@@ -84,7 +71,39 @@ class ScanConfig:
                 raise ConfigurationError(f"Include pattern '{pat}' must not start with '!'.")
 
     def validate_environment(self) -> None:
-        pass  # No external dependencies
+        pass  # No external dependencies for base config
+
+
+@dataclass(slots=True)
+class FilesystemScanConfig(ScanConfig):
+    """Scan configuration for local filesystem source."""
+    use_gitignore: bool = True
+    follow_symlinks_dirs: bool = False
+    symlinks_files: SymlinkFilesMode = SymlinkFilesMode.follow
+    hard_exclude_dirs: List[str] = field(default_factory=lambda: [".git"])
+
+    def validate(self) -> None:
+        ScanConfig.validate(self)  # Call parent method explicitly
+        # Additional filesystem-specific structural checks if needed
+        # (currently none)
+
+    def validate_environment(self) -> None:
+        ScanConfig.validate_environment(self)
+        # No external dependencies for filesystem scanning
+
+
+@dataclass(slots=True)
+class GitScanConfig(ScanConfig):
+    """Scan configuration for Git source. (Not yet implemented)"""
+    # TODO: Add Git-specific parameters like commit_range, include_untracked, etc.
+    pass
+
+
+@dataclass(slots=True)
+class S3ScanConfig(ScanConfig):
+    """Scan configuration for S3 source. (Not yet implemented)"""
+    # TODO: Add S3-specific parameters like bucket, prefix, endpoint_url, etc.
+    pass
 
 
 @dataclass(slots=True)
@@ -164,8 +183,7 @@ class RedactConfig:
     config_path: Optional[Path] = None
 
     def validate(self) -> None:
-        # Structural checks only – file existence is environment-dependent
-        pass
+        pass  # Structural checks only – file existence is environment-dependent
 
     def validate_environment(self) -> None:
         if self.config_path is not None and not self.config_path.is_file():
@@ -178,7 +196,6 @@ class ClassifyConfig:
     config_path: Optional[Path] = None
 
     def validate(self) -> None:
-        # Structural checks only – file existence is environment-dependent
         pass
 
     def validate_environment(self) -> None:
@@ -196,8 +213,7 @@ class TokenCountConfig:
     token: Optional[str] = None
 
     def validate(self) -> None:
-        # Structural checks – currently none, but keep for consistency
-        pass
+        pass  # Structural checks – currently none
 
     def validate_environment(self) -> None:
         if self.enabled:
@@ -211,7 +227,7 @@ class TokenCountConfig:
 
 
 # ----------------------------------------------------------------------
-# Partition configuration (new)
+# Partition configuration
 # ----------------------------------------------------------------------
 
 @dataclass(slots=True)
@@ -245,7 +261,7 @@ class ExportConfig:
     """Complete export configuration."""
     mode: Mode = Mode.full
     format: str = "xml"
-    scan: ScanConfig = field(default_factory=ScanConfig)
+    scan: ScanConfig = field(default_factory=ScanConfig)  # polymorphic
     filter: FilterConfig = field(default_factory=FilterConfig)
     output: OutputFormatConfig = field(default_factory=OutputFormatConfig)
     binary: BinaryHandlingConfig = field(default_factory=BinaryHandlingConfig)
@@ -292,7 +308,7 @@ class ExportConfig:
 
 
 # ----------------------------------------------------------------------
-# RestoreConfig (enhanced with security flags)
+# RestoreConfig
 # ----------------------------------------------------------------------
 
 @dataclass(slots=True)

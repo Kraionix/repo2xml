@@ -3,18 +3,22 @@ from __future__ import annotations
 
 from typing import List
 
-from repo2xml.config import ExportConfig
+from repo2xml.config import FilterConfig
 from repo2xml.domain.model import FileEntry
 
 
-def apply_file_filters(entries: List[FileEntry], config: ExportConfig) -> List[FileEntry]:
+def apply_file_filters(entries: List[FileEntry], filter_config: FilterConfig) -> List[FileEntry]:
     """
-    Filter FileEntry list by size and mtime according to config.
+    Filter FileEntry list by size and mtime according to filter_config.
 
-    This is a pure function, intentionally extracted to be reused between
-    the pipeline and the dry‑run facade method.
+    Args:
+        entries: List of file entries to filter.
+        filter_config: Configuration containing size and time thresholds.
+
+    Returns:
+        Filtered list of file entries.
     """
-    cfg = config.filter
+    cfg = filter_config
     if (
         cfg.min_file_size > 0
         or cfg.max_file_size > 0

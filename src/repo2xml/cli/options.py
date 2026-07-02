@@ -19,7 +19,7 @@ from repo2xml.config import (
     OutputFormatConfig,
     RedactConfig,
     RootPathMode,
-    ScanConfig,
+    FilesystemScanConfig,
     SymlinkFilesMode,
     TextHandlingConfig,
     TokenCountConfig,
@@ -71,7 +71,7 @@ class ExportOptions:
     newer_than: Optional[str] = None
     older_than: Optional[str] = None
 
-    # Gitignore and scanning
+    # Gitignore and scanning (filesystem-specific)
     gitignore: bool = True
     ignore: Optional[List[str]] = None
     include: Optional[List[str]] = None
@@ -85,9 +85,11 @@ class ExportOptions:
     newline: NewlineMode = NewlineMode.preserve
     decode_errors: DecodeErrors = DecodeErrors.replace
 
-    # Scanner and configs
+    # Scanner source (common)
     source: str = "filesystem"
-    source_option: Optional[List[str]] = None
+    # source_option removed – all options are now typed in config classes
+
+    # Redact/classify configs
     redact_config: Optional[Path] = None
     classify_config: Optional[Path] = None
 
@@ -96,7 +98,7 @@ class ExportOptions:
     tokenizer_model: str = "deepseek-ai/DeepSeek-V4-Pro"
     hf_token: Optional[str] = None
 
-    # --- NEW: Partition options ---
+    # Partition options
     split: bool = False
     max_tokens_per_part: int = 32000
     part_pattern: str = "context_part_{n:03d}.xml"
@@ -124,25 +126,15 @@ class ExportOptions:
         if self.older_than:
             older_ts = parse_datetime_arg(self.older_than)
 
-        # Source options
-        source_opts = {}
-        if self.source_option:
-            for item in self.source_option:
-                if "=" not in item:
-                    raise ConfigurationError(f"Source option must be in key=value format: '{item}'")
-                key, _, value = item.partition("=")
-                source_opts[key.strip()] = value.strip()
-
-        # Build sub‑configs
-        scan = ScanConfig(
-            use_gitignore=self.gitignore,
+        # Build filesystem scan config
+        scan = FilesystemScanConfig(
+            source=self.source,
             ignore_patterns=user_ignore,
             include_patterns=list(self.include) if self.include else [],
-            hard_exclude_dirs=self.hard_exclude,
+            use_gitignore=self.gitignore,
             follow_symlinks_dirs=self.follow_symlinks_dirs,
             symlinks_files=self.symlinks_files,
-            source=self.source,
-            source_options=source_opts,
+            hard_exclude_dirs=self.hard_exclude,
         )
 
         filter_ = FilterConfig(

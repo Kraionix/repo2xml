@@ -63,14 +63,14 @@ def main(
     newline: NewlineMode = typer.Option(NewlineMode.preserve, "--newline", help="Newline normalization."),
     decode_errors: DecodeErrors = typer.Option(DecodeErrors.replace, "--decode-errors", help="Text decoding errors policy."),
     source: str = typer.Option("filesystem", "--source", help="Scanner source."),
-    source_option: Optional[List[str]] = typer.Option(None, "--source-option", help="Extra key=value pairs for the scanner."),
+    # source_option removed – all options are now typed in config classes
     redact_config: Optional[Path] = typer.Option(None, "--redact-config", help="Path to YAML file with redaction rules.", exists=True, file_okay=True, dir_okay=False, resolve_path=True),
     classify_config: Optional[Path] = typer.Option(None, "--classify-config", help="Path to YAML file with classification rules.", exists=True, file_okay=True, dir_okay=False, resolve_path=True),
     count_tokens: bool = typer.Option(False, "--count-tokens/--no-count-tokens", help="Count tokens in text files."),
     tokenizer_model: str = typer.Option("deepseek-ai/DeepSeek-V4-Pro", "--tokenizer-model", help="Hugging Face model for tokenization."),
     hf_token: Optional[str] = typer.Option(None, "--hf-token", help="Hugging Face token for authenticated downloads (increases rate limits)."),
     verbose_errors: bool = typer.Option(False, "--verbose-errors", help="Show detailed error examples in reports."),
-    # NEW: Partition options
+    # Partition options
     split: bool = typer.Option(False, "--split", help="Split output into multiple parts (first part contains only structure)."),
     max_tokens_per_part: int = typer.Option(32000, "--max-tokens", help="Maximum tokens per part (only when --split is used)."),
     part_pattern: str = typer.Option("context_part_{n:03d}.xml", "--part-pattern", help="Pattern for part filenames (e.g., 'part_{n:03d}.xml')."),
@@ -123,7 +123,7 @@ def main(
         newline=newline,
         decode_errors=decode_errors,
         source=source,
-        source_option=source_option,
+        # source_option removed
         redact_config=redact_config,
         classify_config=classify_config,
         count_tokens=count_tokens,

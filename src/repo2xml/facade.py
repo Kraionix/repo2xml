@@ -9,15 +9,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, List, Optional, Union
 
-from repo2xml.contracts import ProgressReporter
+from repo2xml.contracts import ProgressReporter, ScanUseCase
 from repo2xml.application.factories import ExportComponentFactory
 from repo2xml.application.statistics_collector import StatisticsCollector
 from repo2xml.application.filters import apply_file_filters
+from repo2xml.application.scan_usecase_factory import ScanUseCaseFactory
 from repo2xml.config import ExportConfig, RestoreConfig
 from repo2xml.domain.exceptions import ConfigurationError, FacadeError
 from repo2xml.domain.model import ExportStats, FileEntry, RestoreStats
-from repo2xml.services.scan.gitignore import GitignoreEngine
-from repo2xml.services.scan.registry import create_scanner
 from repo2xml.services.output.targets import OutputTarget
 
 logger = logging.getLogger("repo2xml.facade")
@@ -50,8 +49,14 @@ class StreamTarget(OutputTarget):
 class RepoXML:
     """Unified facade for export and restore operations."""
 
-    def __init__(self, config: Union[ExportConfig, RestoreConfig]):
+    def __init__(
+        self,
+        config: Union[ExportConfig, RestoreConfig],
+        *,
+        scan_usecase_factory: Optional[ScanUseCaseFactory] = None,
+    ):
         self.config = config
+        self._scan_usecase_factory = scan_usecase_factory or ScanUseCaseFactory()
 
     def export(
         self,
@@ -72,12 +77,17 @@ class RepoXML:
         root = root_path.resolve()
         self._validate_root_path(root)
 
+        # Create ScanUseCase
+        scan_use_case: ScanUseCase = self._scan_usecase_factory.create(
+            config.scan, root, config.filter
+        )
+
         output_target = StreamTarget(output_stream)
-        factory = ExportComponentFactory(config, root, output_target, progress)
-        orchestrator, collector = factory.build()
+        factory = ExportComponentFactory(config, output_target, progress)
+        orchestrator, collector = factory.build(scan_use_case=scan_use_case)
 
         try:
-            stats = orchestrator.execute(stats_only=stats_only)
+            stats = orchestrator.execute(root, stats_only=stats_only)
         except KeyboardInterrupt:
             raise
         except Exception as e:
@@ -98,27 +108,10 @@ class RepoXML:
         config: ExportConfig = self.config
         root = root_path.resolve()
 
-        gitignore_engine = GitignoreEngine(
-            root_path=root,
-            user_ignore=config.scan.ignore_patterns,
-            user_include=config.scan.include_patterns,
-        )
-
-        scanner = create_scanner(
-            config.scan.source,
-            root_path=root,
-            ignore_provider=gitignore_engine,
-            use_gitignore=config.scan.use_gitignore,
-            follow_symlinks_dirs=config.scan.follow_symlinks_dirs,
-            symlinks_files=config.scan.symlinks_files.value,
-            hard_exclude_dirs=set(config.scan.hard_exclude_dirs),
-            **config.scan.source_options,
-        )
-
-        entries = list(scanner.scan())
-        entries = apply_file_filters(entries, config)
-        entries.sort(key=lambda e: e.rel_path)
-        return entries
+        # Use the ScanUseCase to get filtered and sorted entries
+        scan_use_case = self._scan_usecase_factory.create(config.scan, root, config.filter)
+        scan_result = scan_use_case.execute(root)
+        return scan_result.entries
 
     def export_to_bytes(self, root_path: Path) -> bytes:
         buf = io.BytesIO()

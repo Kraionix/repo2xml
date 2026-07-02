@@ -4,17 +4,16 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
-from repo2xml.contracts import ProgressReporter, ScannerLike
+from repo2xml.contracts import ProgressReporter, ScanUseCase
 from repo2xml.application.entry_processor import EntryProcessor
 from repo2xml.application.file_processing_engine import FileProcessingEngine
-from repo2xml.application.scanner_service import ScannerService
 from repo2xml.application.statistics_collector import StatisticsCollector
 from repo2xml.application.writer_coordinator import WriterCoordinator
 from repo2xml.config import ExportConfig, Mode
 from repo2xml.domain.constants import SCHEMA_VERSION
-from repo2xml.domain.model import ExportMeta, ExportStats, FileEntry
+from repo2xml.domain.model import ExportMeta, ExportStats
 from repo2xml.utils.paths import format_root_path
 from repo2xml.utils.version import tool_version
 
@@ -32,26 +31,25 @@ class PipelineOrchestrator:
     def __init__(
         self,
         config: ExportConfig,
-        scanner: ScannerLike,
+        scan_use_case: ScanUseCase,
         entry_processor: EntryProcessor,
         writer_coordinator: WriterCoordinator,
         statistics_collector: StatisticsCollector,
         progress_reporter: ProgressReporter,
-        root_path: Path,
     ):
         self.config = config
-        self.scanner = scanner
-        self.entry_processor = entry_processor
-        self.writer = writer_coordinator
-        self.stats = statistics_collector
-        self.progress = progress_reporter
-        self.root_path = root_path
+        self._scan_use_case = scan_use_case
+        self._entry_processor = entry_processor
+        self._writer = writer_coordinator
+        self._stats = statistics_collector
+        self._progress = progress_reporter
 
-    def execute(self, *, stats_only: bool = False) -> ExportStats:
+    def execute(self, root_path: Path, *, stats_only: bool = False) -> ExportStats:
         """
         Run the full export pipeline.
 
         Args:
+            root_path: The root directory of the project to export.
             stats_only: If True, only collect statistics, do not write output.
 
         Returns:
@@ -60,23 +58,22 @@ class PipelineOrchestrator:
         # ------------------------------------------------------------------
         # 1. Scan and filter
         # ------------------------------------------------------------------
-        self.progress.set_phase("Scanning")
-        self.progress.set_total(None)
-        logger.info("Scanning repository: %s", self.root_path)
+        self._progress.set_phase("Scanning")
+        self._progress.set_total(None)
+        logger.info("Scanning repository: %s", root_path)
 
-        scanner_service = ScannerService(self.scanner, self.config)
-        scan_result = scanner_service.scan(self.root_path)
+        scan_result = self._scan_use_case.execute(root_path)
         entries = scan_result.entries
         warnings = scan_result.warnings
 
         if warnings:
             logger.warning("Scan warnings: %s", warnings)
-            self.progress.set_warning_count(1)
+            self._progress.set_warning_count(1)
 
         total = len(entries)
         logger.info("Found %d files.", total)
-        self.progress.set_total(total)
-        self.progress.set_phase("Processing")
+        self._progress.set_total(total)
+        self._progress.set_phase("Processing")
 
         # ------------------------------------------------------------------
         # 2. Prepare meta and write header / structure (skip if stats_only)
@@ -86,7 +83,7 @@ class PipelineOrchestrator:
             generated_at = datetime.now(timezone.utc).isoformat()
 
         meta = ExportMeta(
-            root_path=format_root_path(self.root_path, self.config.output.root_path_mode),
+            root_path=format_root_path(root_path, self.config.output.root_path_mode),
             generated_at_utc=generated_at,
             tool_version=tool_version("repo2xml"),
             schema_version=SCHEMA_VERSION,
@@ -98,31 +95,31 @@ class PipelineOrchestrator:
         write_enabled = not stats_only
 
         # Enter the writer context – this ensures proper flushing/closing.
-        with self.writer:
+        with self._writer:
             if write_enabled:
-                self.writer.write_header(meta)
-                self.writer.write_structure(entries)
+                self._writer.write_header(meta)
+                self._writer.write_structure(entries)
 
             # If mode is structure, we stop here (no file content).
             if self.config.mode == Mode.structure:
                 if write_enabled:
-                    self.writer.write_footer()
-                self.progress.finish()
-                return self.stats.get_export_stats(warnings)
+                    self._writer.write_footer()
+                self._progress.finish()
+                return self._stats.get_export_stats(warnings)
 
             # Open the files section if we are writing and not in structure mode.
             if write_enabled:
-                self.writer.write_files_open(self.config.mode.value)
+                self._writer.write_files_open(self.config.mode.value)
 
             # ------------------------------------------------------------------
             # 4. Process files (only if there are entries)
             # ------------------------------------------------------------------
             if entries:
                 engine = FileProcessingEngine(
-                    entry_processor=self.entry_processor,
-                    writer_coordinator=self.writer if write_enabled else None,
-                    stats_collector=self.stats,
-                    progress=self.progress,
+                    entry_processor=self._entry_processor,
+                    writer_coordinator=self._writer if write_enabled else None,
+                    stats_collector=self._stats,
+                    progress=self._progress,
                     write_enabled=write_enabled,
                 )
 
@@ -136,13 +133,13 @@ class PipelineOrchestrator:
             # 5. Finish the document (unless stats_only)
             # ------------------------------------------------------------------
             if write_enabled:
-                self.writer.write_files_close()
-                token_stats = self.stats.get_export_stats(warnings).token_stats
-                self.writer.write_statistics(token_stats)
-                self.writer.write_footer()
+                self._writer.write_files_close()
+                token_stats = self._stats.get_export_stats(warnings).token_stats
+                self._writer.write_statistics(token_stats)
+                self._writer.write_footer()
 
         # ------------------------------------------------------------------
         # 6. Finalise
         # ------------------------------------------------------------------
-        self.progress.finish()
-        return self.stats.get_export_stats(warnings)
+        self._progress.finish()
+        return self._stats.get_export_stats(warnings)
