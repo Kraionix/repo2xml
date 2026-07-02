@@ -66,10 +66,11 @@ class RepoXML:
             raise FacadeError("Export operation requires ExportConfig")
 
         config: ExportConfig = self.config
+        # Validate configuration fully (structural + environment) before any I/O
+        config.validate_all()
 
         root = root_path.resolve()
         self._validate_root_path(root)
-        self._validate_dependencies(config)
 
         output_target = StreamTarget(output_stream)
         factory = ExportComponentFactory(config, root, output_target, progress)
@@ -90,16 +91,6 @@ class RepoXML:
             raise ConfigurationError(f"Root path is not a directory: {root}")
         if not os.access(root, os.R_OK):
             raise ConfigurationError(f"Root path is not readable: {root}")
-
-    def _validate_dependencies(self, config: ExportConfig) -> None:
-        if config.token.enabled:
-            try:
-                import transformers  # noqa: F401
-            except ImportError:
-                raise ConfigurationError(
-                    "Token counting requires the 'transformers' library. "
-                    "Install with: pip install repo2xml[tokens]"
-                )
 
     def filtered_scan(self, root_path: Path) -> List[FileEntry]:
         if not isinstance(self.config, ExportConfig):

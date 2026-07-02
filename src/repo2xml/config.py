@@ -83,6 +83,9 @@ class ScanConfig:
             if pat.startswith("!"):
                 raise ConfigurationError(f"Include pattern '{pat}' must not start with '!'.")
 
+    def validate_environment(self) -> None:
+        pass  # No external dependencies
+
 
 @dataclass(slots=True)
 class FilterConfig:
@@ -100,6 +103,9 @@ class FilterConfig:
         if self.min_file_size > 0 and self.max_file_size > 0 and self.min_file_size > self.max_file_size:
             raise ConfigurationError("min_file_size must be <= max_file_size")
 
+    def validate_environment(self) -> None:
+        pass
+
 
 @dataclass(slots=True)
 class OutputFormatConfig:
@@ -115,6 +121,9 @@ class OutputFormatConfig:
         if self.write_buffer_chars < 0:
             raise ConfigurationError("write_buffer_chars must be >= 0")
 
+    def validate_environment(self) -> None:
+        pass
+
 
 @dataclass(slots=True)
 class BinaryHandlingConfig:
@@ -129,6 +138,9 @@ class BinaryHandlingConfig:
         if self.max_hash_size < 0:
             raise ConfigurationError("max_hash_size must be >= 0")
 
+    def validate_environment(self) -> None:
+        pass
+
 
 @dataclass(slots=True)
 class TextHandlingConfig:
@@ -141,6 +153,9 @@ class TextHandlingConfig:
         if self.max_text_size < 0:
             raise ConfigurationError("max_text_size must be >= 0")
 
+    def validate_environment(self) -> None:
+        pass
+
 
 @dataclass(slots=True)
 class RedactConfig:
@@ -149,6 +164,10 @@ class RedactConfig:
     config_path: Optional[Path] = None
 
     def validate(self) -> None:
+        # Structural checks only – file existence is environment-dependent
+        pass
+
+    def validate_environment(self) -> None:
         if self.config_path is not None and not self.config_path.is_file():
             raise ConfigurationError(f"Redact config file does not exist: {self.config_path}")
 
@@ -159,6 +178,10 @@ class ClassifyConfig:
     config_path: Optional[Path] = None
 
     def validate(self) -> None:
+        # Structural checks only – file existence is environment-dependent
+        pass
+
+    def validate_environment(self) -> None:
         if self.config_path is not None and not self.config_path.is_file():
             raise ConfigurationError(f"Classify config file does not exist: {self.config_path}")
 
@@ -173,6 +196,10 @@ class TokenCountConfig:
     token: Optional[str] = None
 
     def validate(self) -> None:
+        # Structural checks – currently none, but keep for consistency
+        pass
+
+    def validate_environment(self) -> None:
         if self.enabled:
             try:
                 import transformers  # noqa: F401
@@ -205,6 +232,9 @@ class PartitionConfig:
             if not self.clipboard_mode and not self.output_pattern:
                 raise ConfigurationError("output_pattern must be provided when clipboard_mode is False")
 
+    def validate_environment(self) -> None:
+        pass
+
 
 # ----------------------------------------------------------------------
 # Main ExportConfig – aggregates all sub-configs
@@ -230,6 +260,7 @@ class ExportConfig:
         self.scan.normalize()
 
     def validate(self) -> None:
+        """Validate structural invariants only (no environment checks)."""
         if not self.format:
             raise ConfigurationError("format must not be empty")
         self.scan.validate()
@@ -241,6 +272,23 @@ class ExportConfig:
         self.classify.validate()
         self.token.validate()
         self.partition.validate()
+
+    def validate_environment(self) -> None:
+        """Validate external dependencies (libraries, files) for all sub-configs."""
+        self.scan.validate_environment()
+        self.filter.validate_environment()
+        self.output.validate_environment()
+        self.binary.validate_environment()
+        self.text.validate_environment()
+        self.redact.validate_environment()
+        self.classify.validate_environment()
+        self.token.validate_environment()
+        self.partition.validate_environment()
+
+    def validate_all(self) -> None:
+        """Run both structural and environment validation."""
+        self.validate()
+        self.validate_environment()
 
 
 # ----------------------------------------------------------------------

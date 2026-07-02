@@ -214,7 +214,7 @@ class ExportOptions:
             partition=partition_cfg,
         )
         config.normalize()
-        config.validate()
+        config.validate_all()  # Runs both structural and environment checks
         return config
 
     def validate_export_compatibility(self) -> None:
